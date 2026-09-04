@@ -365,7 +365,8 @@ static void draw_information_page(bool about) {
     };
     static const char *about_lines[] = {
         "nEdit", "Native plain-text editor", "", "TI-Nspire CX / CX II",
-        "Built for Ndless", "", "Copyright (c) 2026 Ziyang-Bai.", "All rights reserved."
+        "Built for Ndless", "", "Copyright (c) 2026 Ziyang-Bai.",
+        "GNU GPL v3 licensed.", "No warranty; see LICENSE."
     };
     const char *const *lines = about ? about_lines : help;
     size_t count = about ? sizeof(about_lines) / sizeof(about_lines[0]) : sizeof(help) / sizeof(help[0]);

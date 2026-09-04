@@ -38,6 +38,9 @@ GitHub Actions 使用 [`Ziyang-Bai/setup-ndless@v1`](https://github.com/Ziyang-B
 - 上传两个 `.tns` 文件作为工作流构建产物；
 - 推送 `v*` 标签时自动创建 GitHub Release，并附加 `nhex.tns` 与 `nedit.tns`。
 
-## 版权
+## 许可证
 
-Copyright © 2026 Ziyang-Bai. All rights reserved.
+Copyright © 2026 Ziyang-Bai.
+
+nKits 仓库中的 nHex、nEdit、测试和构建脚本统一使用
+[GNU General Public License v3.0](LICENSE) 授权。

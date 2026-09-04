@@ -72,7 +72,7 @@ ASCII 模式直接映射字母、数字、空格和计算器上的常用标点�
 Ndless SDK 安装在 WSL 并已将 `nspire-gcc`、`nspire-ld`、`genzehn`、`make-prg` 放入 `PATH` 后：
 
 ```sh
-cd /mnt/c/Users/baizi/Documents/GitHub/nHex
+cd /mnt/c/Users/baizi/Documents/GitHub/nKits/nHex
 make
 ```
 
@@ -81,3 +81,8 @@ make
 ```sh
 make host-test
 ```
+
+## 许可证
+
+nHex 是 nKits 的组成部分，使用仓库根目录中的
+[GNU General Public License v3.0](../LICENSE) 授权。

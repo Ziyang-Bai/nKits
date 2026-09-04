@@ -557,7 +557,8 @@ static void draw_information_page(bool about) {
         "Built for Ndless",
         "",
         "Copyright (c) 2026 Ziyang-Bai.",
-        "All rights reserved."
+        "GNU GPL v3 licensed.",
+        "No warranty; see LICENSE."
     };
     const char *const *lines = about ? about_lines : help_lines;
     size_t count = about ? sizeof(about_lines) / sizeof(about_lines[0])

@@ -52,7 +52,12 @@ Sticky Keys 默认关闭。开启后可先按下并释放 `Ctrl` 或 `Shift`，�
 ## 构建
 
 ```sh
-cd /mnt/c/Users/baizi/Documents/GitHub/nEdit
+cd /mnt/c/Users/baizi/Documents/GitHub/nKits/nEdit
 make
 make host-test
 ```
+
+## 许可证
+
+nEdit 是 nKits 的组成部分，使用仓库根目录中的
+[GNU General Public License v3.0](../LICENSE) 授权。
