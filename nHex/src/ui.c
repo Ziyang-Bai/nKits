@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "version.h"
 
 #include <libndls.h>
 #include <nspireio/nspireio.h>
@@ -555,6 +556,9 @@ static void draw_information_page(bool about) {
         "",
         "TI-Nspire CX / CX II",
         "Built for Ndless",
+        "Version " NKITS_VERSION,
+        NKITS_STAGE,
+        "Commit " NKITS_COMMIT,
         "",
         "Copyright (c) 2026 Ziyang-Bai.",
         "GNU GPL v3 licensed.",

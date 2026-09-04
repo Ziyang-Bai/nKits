@@ -23,6 +23,14 @@ make test
 make
 ```
 
+可在编译时写入程序 About 页显示的版本、发布阶段和提交：
+
+```sh
+make VERSION=v0.0.1 COMMIT="$(git rev-parse --short=12 HEAD)" STAGE="Alpha Testing"
+```
+
+未指定时分别使用 `dev`、`unknown` 和 `Alpha Testing`。
+
 生成：
 
 - `nHex/nhex.tns`
@@ -35,6 +43,8 @@ make
 GitHub Actions 使用 [`Ziyang-Bai/setup-ndless@v1`](https://github.com/Ziyang-Bai/setup-ndless) 配置 Ndless 工具链：
 
 - 每次 Push 和 Pull Request 运行两个项目的主机测试并交叉编译；
+- 构建时把标签名（非标签构建为 `dev`）、12 位 commit hash 和
+  `Alpha Testing` 写入两个程序；
 - 上传两个 `.tns` 文件作为工作流构建产物；
 - 推送 `v*` 标签时自动创建 GitHub Release，并附加 `nhex.tns` 与 `nedit.tns`。
 

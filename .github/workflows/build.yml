@@ -25,14 +25,25 @@ jobs:
       - name: Set up Ndless
         id: ndless
         uses: Ziyang-Bai/setup-ndless@v1
+      - name: Prepare build metadata
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "NKITS_VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "NKITS_VERSION=dev" >> "$GITHUB_ENV"
+          fi
+          echo "NKITS_COMMIT=${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+          echo "NKITS_STAGE=Alpha Testing" >> "$GITHUB_ENV"
+
 
       - name: Build calculator packages
-        run: make
+        run: make VERSION="$NKITS_VERSION" COMMIT="$NKITS_COMMIT" STAGE="$NKITS_STAGE"
 
       - name: Upload calculator packages
         uses: actions/upload-artifact@v7
         with:
-          name: nKits-${{ github.sha }}
+          name: nKits-${{ env.NKITS_VERSION }}-${{ env.NKITS_COMMIT }}
           path: |
             nHex/nhex.tns
             nEdit/nedit.tns

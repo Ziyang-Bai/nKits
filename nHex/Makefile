@@ -1,4 +1,8 @@
 DEBUG ?= FALSE
+VERSION ?= dev
+COMMIT ?= unknown
+STAGE ?= Alpha Testing
+
 
 GCC := nspire-gcc
 LD := nspire-ld
@@ -9,8 +13,10 @@ HOST_CC ?= cc
 TARGET := nhex
 SOURCES := src/main.c src/app.c src/editor.c src/file_buffer.c src/input.c src/ui.c
 OBJECTS := $(SOURCES:.c=.o)
+CPPFLAGS := -DNKITS_VERSION='"$(VERSION)"' -DNKITS_COMMIT='"$(COMMIT)"' \
+	-DNKITS_STAGE='"$(STAGE)"'
 
-CFLAGS := -std=gnu99 -Wall -Wextra -marm -ffunction-sections -fdata-sections -Isrc
+CFLAGS := -std=gnu99 -Wall -Wextra -marm -ffunction-sections -fdata-sections -Isrc -I..
 LDFLAGS := -Wl,--gc-sections -lnspireio
 ZEHNFLAGS := --name "nHex"
 
@@ -20,12 +26,14 @@ else
 CFLAGS += -Os
 endif
 
-.PHONY: all clean host-test
+.PHONY: all clean host-test FORCE
 
 all: $(TARGET).tns
+src/ui.o: ../version.h FORCE
+
 
 src/%.o: src/%.c
-	$(GCC) $(CFLAGS) -c $< -o $@
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(TARGET).elf: $(OBJECTS)
 	$(LD) $(OBJECTS) -o $@ $(LDFLAGS)

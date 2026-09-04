@@ -1,8 +1,12 @@
+VERSION ?= dev
+COMMIT ?= unknown
+STAGE ?= Alpha Testing
+
 .PHONY: all test clean
 
 all:
-	$(MAKE) -C nHex
-	$(MAKE) -C nEdit
+	$(MAKE) -C nHex VERSION="$(VERSION)" COMMIT="$(COMMIT)" STAGE="$(STAGE)"
+	$(MAKE) -C nEdit VERSION="$(VERSION)" COMMIT="$(COMMIT)" STAGE="$(STAGE)"
 
 test:
 	$(MAKE) -C nHex host-test
