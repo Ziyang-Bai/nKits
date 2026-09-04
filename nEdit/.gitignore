@@ -1,0 +1,7 @@
+build/
+*.o
+*.elf
+*.tns
+*.zehn
+*.nedit.tmp
+*.nedit.backup

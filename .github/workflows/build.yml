@@ -1,0 +1,50 @@
+name: Build and Release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run host tests
+        run: make test
+
+      - name: Set up Ndless
+        id: ndless
+        uses: Ziyang-Bai/setup-ndless@v1
+
+      - name: Build calculator packages
+        run: make
+
+      - name: Upload calculator packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: nKits-${{ github.sha }}
+          path: |
+            nHex/nhex.tns
+            nEdit/nedit.tns
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            nHex/nhex.tns
+            nEdit/nedit.tns
+          fail_on_unmatched_files: true
+          generate_release_notes: true

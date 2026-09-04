@@ -1,0 +1,10 @@
+**/build/
+**/*.o
+**/*.elf
+**/*.tns
+**/*.zehn
+*.log
+*.ppm
+*.png
+*.snapshot
+.DS_Store

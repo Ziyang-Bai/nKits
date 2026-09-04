@@ -1,0 +1,12 @@
+build/
+*.o
+*.elf
+*.tns
+*.zehn
+*.nhex.journal
+*.nhex.tmp
+*.nhex.backup
+firebird-stderr*.log
+*.ppm
+*.png
+*.snapshot
