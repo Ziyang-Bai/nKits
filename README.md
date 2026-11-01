@@ -2,55 +2,30 @@
 
 [![Build and Release](https://github.com/Ziyang-Bai/nKits/actions/workflows/build.yml/badge.svg)](https://github.com/Ziyang-Bai/nKits/actions/workflows/build.yml)
 
-TI-Nspire CX / CX II 的 Ndless 原生文件编辑工具集。
+TI-Nspire CX / CX II 的 Ndless 原生工具集。
+
+下载：[Nightly 测试版](https://github.com/Ziyang-Bai/nKits/releases/tag/nightly)。
 
 ## 工具
 
-### [nHex](nHex)
+| 工具 | 用途 |
+| --- | --- |
+| [nHex](nHex) | 十六进制编辑器|
+| [nEdit](nEdit) | 纯文本编辑器|
+| [nClock](nClock) | 时钟 |
+| [nCapture](nCapture) | 按 **Ctrl+.** 截图 |
+| [nProtect](nProtect) | 保护文件浏览器入口 |
+| [nHide](nHide) | 隐藏文档 |
+| [ThemeEditor](ThemeEditor) | 编辑主题 |
+| [TaskManager](TaskManager) | 任务管理器 |
+| [nUSB](#nusb) | FAT32 / exFAT U盘读写 |
 
-320×240 原生十六进制编辑器。支持分页缓存、Hex/ASCII 同步编辑、创建与扩展文件、Go To、重新载入以及带备份恢复的安全保存。
-
-### [nEdit](nEdit)
-
-320×240 原生纯文本编辑器。支持任意扩展名、Gap Buffer 编辑、创建文件、Go To Line、Caps Lock、Sticky Keys 以及带备份恢复的安全保存。
-
-## 构建
-
-需要 Ndless SDK。进入 WSL/Linux 环境后在仓库根目录执行：
-
-```sh
-make test
-make
-```
-
-可在编译时写入程序 About 页显示的版本、发布阶段和提交：
-
-```sh
-make VERSION=v0.0.1 COMMIT="$(git rev-parse --short=12 HEAD)" STAGE="Alpha Testing"
-```
-
-未指定时分别使用 `dev`、`unknown` 和 `Alpha Testing`。
-
-生成：
-
-- `nHex/nhex.tns`
-- `nEdit/nedit.tns`
-
-也可以单独进入 `nHex` 或 `nEdit` 目录构建。每个子项目的详细功能和快捷键见对应 README。
-
-## CI/CD
-
-GitHub Actions 使用 [`Ziyang-Bai/setup-ndless@v1`](https://github.com/Ziyang-Bai/setup-ndless) 配置 Ndless 工具链：
-
-- 每次 Push 和 Pull Request 运行两个项目的主机测试并交叉编译；
-- 构建时把标签名（非标签构建为 `dev`）、12 位 commit hash 和
-  `Alpha Testing` 写入两个程序；
-- 上传两个 `.tns` 文件作为工作流构建产物；
-- 推送 `v*` 标签时自动创建 GitHub Release，并附加 `nhex.tns` 与 `nedit.tns`。
 
 ## 许可证
 
-Copyright © 2026 Ziyang-Bai.
+Copyright (c) 2026 Ziyang-Bai. [GNU GPL v3.0](LICENSE)。
 
-nKits 仓库中的 nHex、nEdit、测试和构建脚本统一使用
-[GNU General Public License v3.0](LICENSE) 授权。
+- **nClock**：Copyright (c) 2014 Levak. Contributions by Xavier Andreani (2016). GPL v3+。
+- **nCapture**：Copyright (c) 2013 Levak. LGPL v2+。
+- **FatFs**：Copyright (c) 2025 ChaN. [BSD-style 1-clause](nUSB/third_party/fatfs/LICENSE.txt)。
+- **NspireIO**：Julian Mackeben / compu、Manfred Becker、totorigolo。[LGPL v2.1+](https://github.com/Vogtinator/nspire-io)。

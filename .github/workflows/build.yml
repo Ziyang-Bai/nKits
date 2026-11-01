@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
 jobs:
   build:
@@ -27,9 +27,13 @@ jobs:
         uses: Ziyang-Bai/setup-ndless@v1
       - name: Prepare build metadata
         shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             echo "NKITS_VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "NKITS_VERSION=nightly" >> "$GITHUB_ENV"
           else
             echo "NKITS_VERSION=dev" >> "$GITHUB_ENV"
           fi
@@ -47,6 +51,16 @@ jobs:
           path: |
             nHex/nhex.tns
             nEdit/nedit.tns
+            nUSB/nusb.tns
+            nUSB/tools/nusb-diag.tns
+            nClock/nclock.tns
+            nClock/tools/nclock-diag.tns
+            nCapture/ncapture.tns
+            nProtect/nprotect.tns
+            nHide/nhide.tns
+            ThemeEditor/themeeditor.tns
+            TaskManager/taskmanager.tns
+            LICENSE
           if-no-files-found: error
           retention-days: 14
 
@@ -57,5 +71,79 @@ jobs:
           files: |
             nHex/nhex.tns
             nEdit/nedit.tns
+            nUSB/nusb.tns
+            nUSB/tools/nusb-diag.tns
+            nClock/nclock.tns
+            nClock/tools/nclock-diag.tns
+            nCapture/ncapture.tns
+            nProtect/nprotect.tns
+            nHide/nhide.tns
+            ThemeEditor/themeeditor.tns
+            TaskManager/taskmanager.tns
+            LICENSE
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+  nightly:
+    needs: build
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download calculator packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: nKits-*
+          path: packages
+          merge-multiple: true
+
+      - name: Update nightly release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          latest="$(gh api "repos/$GH_REPO/commits/$DEFAULT_BRANCH" --jq .sha)"
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo "Skipping nightly for superseded commit $GITHUB_SHA"
+            exit 0
+          fi
+
+          release_id="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "nightly") | .id')"
+          if [[ -z "$release_id" ]]; then
+            gh release create nightly --draft --target "$GITHUB_SHA" --prerelease \
+              --latest=false --title Nightly
+          fi
+
+          shopt -s globstar nullglob
+          files=(packages/**/*.tns)
+          gh release upload nightly "${files[@]}" packages/LICENSE --clobber
+
+          {
+            echo "Unstable nKits tools built from $GH_REPO@$GITHUB_SHA."
+            echo
+            echo "This prerelease is updated automatically after successful default-branch builds."
+            echo
+            for file in "${files[@]}"; do
+              name="${file##*/}"
+              printf -- '- [%s](https://github.com/%s/releases/download/nightly/%s)\n' \
+                "$name" "$GH_REPO" "$name"
+            done
+          } > "$RUNNER_TEMP/nightly-notes.md"
+
+          tag="$(gh api "repos/$GH_REPO/git/matching-refs/tags/nightly" \
+            --jq '.[] | select(.ref == "refs/tags/nightly") | .object.sha')"
+          if [[ -n "$tag" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/nightly" \
+              -f "sha=$GITHUB_SHA" -F force=true
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref=refs/tags/nightly -f "sha=$GITHUB_SHA"
+          fi
+          gh release edit nightly --draft=false --prerelease --latest=false --title Nightly \
+            --notes-file "$RUNNER_TEMP/nightly-notes.md"

@@ -87,7 +87,7 @@ static bool create_file(App *app, const char *path, bool check_dirty) {
 static void prompt_open(App *app) {
     const char *initial = app->file_open ? text_buffer_path(&app->buffer) : get_documents_dir();
     bool create = false;
-    char *path = ui_choose_file(&app->ui, initial, &create);
+    char *path = ui_choose_file(&app->ui, initial, &create, false);
     if (path) {
         if (create) create_file(app, path, true);
         else open_file(app, path, true);
@@ -95,16 +95,19 @@ static void prompt_open(App *app) {
     }
 }
 
-static void prompt_save_as(App *app) {
+static bool prompt_save_as(App *app) {
+    bool saved = false;
     char *path = ui_prompt("nEdit - Save As", "Destination path", text_buffer_path(&app->buffer));
-    if (!path) return;
+    if (!path) return false;
     if (!text_buffer_save_as(&app->buffer, path)) {
         ui_message("Save As failed", text_buffer_error(&app->buffer));
         set_status(app, "Save As failed");
     } else {
         set_status(app, "Saved as %.65s", path);
+        saved = true;
     }
     free(path);
+    return saved;
 }
 
 static void prompt_goto(App *app) {
@@ -146,8 +149,11 @@ static void edit_result(App *app, bool ok) {
         set_status(app, "%s", text_buffer_error(&app->buffer));
 }
 
-static void request_exit(App *app) {
-    if (resolve_dirty(app)) app->quit = true;
+static void close_file(App *app) {
+    text_buffer_close(&app->buffer);
+    app->file_open = false;
+    memset(&app->editor, 0, sizeof(app->editor));
+    app->status[0] = '\0';
 }
 
 static void handle_event(App *app, InputEvent event) {
@@ -160,10 +166,16 @@ static void handle_event(App *app, InputEvent event) {
         case INPUT_PAGE_DOWN: editor_move(&app->editor, EDIT_MOVE_PAGE_DOWN); break;
         case INPUT_HOME: editor_move(&app->editor, EDIT_MOVE_HOME); break;
         case INPUT_END: editor_move(&app->editor, EDIT_MOVE_END); break;
+        case INPUT_DOCUMENT_HOME: editor_move(&app->editor, EDIT_MOVE_DOCUMENT_HOME); break;
+        case INPUT_DOCUMENT_END: editor_move(&app->editor, EDIT_MOVE_DOCUMENT_END); break;
         case INPUT_NEW: prompt_new(app); break;
         case INPUT_OPEN: prompt_open(app); break;
-        case INPUT_SAVE: save_file(app); break;
-        case INPUT_SAVE_AS: prompt_save_as(app); break;
+        case INPUT_SAVE:
+            if (save_file(app)) close_file(app);
+            break;
+        case INPUT_SAVE_AS:
+            if (prompt_save_as(app)) close_file(app);
+            break;
         case INPUT_RELOAD: reload_file(app); break;
         case INPUT_GOTO: prompt_goto(app); break;
         case INPUT_NEWLINE: edit_result(app, editor_insert_newline(&app->editor)); break;
@@ -177,32 +189,47 @@ static void handle_event(App *app, InputEvent event) {
             set_status(app, "STICKY KEYS %s", app->sticky_keys ? "ON" : "OFF");
             break;
         case INPUT_BACKSPACE: edit_result(app, editor_backspace(&app->editor)); break;
-        case INPUT_MENU: ui_show_menu(&app->ui); break;
-        case INPUT_EXIT: request_exit(app); break;
+        case INPUT_DELETE: edit_result(app, editor_delete(&app->editor)); break;
+        case INPUT_SYMBOLS: {
+            uint32_t value = ui_choose_symbol(&app->ui);
+            if (value) edit_result(app, editor_insert_character(&app->editor, value));
+            break;
+        }
+        case INPUT_MENU: {
+            InputEvent choice = {ui_show_menu(&app->ui), 0};
+            if (choice.action != INPUT_NONE) handle_event(app, choice);
+            break;
+        }
+        case INPUT_EXIT:
+            if (resolve_dirty(app)) close_file(app);
+            break;
         case INPUT_CHARACTER: edit_result(app, editor_insert_character(&app->editor, event.character)); break;
         case INPUT_NONE: break;
     }
 }
 
 bool app_init(App *app, const char *initial_path) {
-    bool create = false;
-    char *path;
     memset(app, 0, sizeof(*app));
     if (!ui_init(&app->ui)) return false;
-    if (initial_path && initial_path[0]) return open_file(app, initial_path, false);
-    path = ui_choose_file(&app->ui, get_documents_dir(), &create);
-    if (!path) return false;
-    if (!(create ? create_file(app, path, false) : open_file(app, path, false))) {
-        free(path);
-        return false;
-    }
-    free(path);
+    if (initial_path && initial_path[0]) open_file(app, initial_path, false);
     return true;
 }
 
 void app_run(App *app) {
     while (!app->quit) {
         InputEvent event;
+        if (!app->file_open) {
+            bool create = false;
+            char *path = ui_choose_file(&app->ui, get_documents_dir(), &create, true);
+            if (!path) {
+                app->quit = true;
+            } else {
+                if (create) create_file(app, path, false);
+                else open_file(app, path, false);
+                free(path);
+            }
+            continue;
+        }
         ui_draw(&app->ui, &app->editor, app->status,
                 app->caps_lock, app->sticky_keys);
         input_wait();

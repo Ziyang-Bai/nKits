@@ -1,0 +1,13 @@
+FatFs R0.16 patch 2, Copyright (C) 2025 ChaN
+Source: https://github.com/abbrev/fatfs/tree/ab992fcf2926b8a1ee3f0a8f9cefb6584174100d
+Files: source/ff.c, source/ff.h, source/ffunicode.c, source/diskio.h,
+       source/ffconf.h, LICENSE.txt
+
+ff.h, ffunicode.c and diskio.h retain the upstream implementation.
+Local patch in ff.c: dir_next rejects FAT32 directory-chain links outside
+the volume and reserved/bad cluster markers below 0x0FFFFFF8 instead of
+silently returning end-of-directory. Valid FAT32 EOC markers are unchanged.
+ffconf.h is configured for nUSB: read-only FAT32 directory browsing,
+static UTF-8 LFN support, CP437, one volume with explicit primary partition
+selection, and 512 to 4096 byte sectors. See LICENSE.txt for the original
+license; the upstream source files also retain their copyright notices.

@@ -19,7 +19,9 @@ typedef enum {
     EDIT_MOVE_PAGE_UP,
     EDIT_MOVE_PAGE_DOWN,
     EDIT_MOVE_HOME,
-    EDIT_MOVE_END
+    EDIT_MOVE_END,
+    EDIT_MOVE_DOCUMENT_HOME,
+    EDIT_MOVE_DOCUMENT_END
 } EditorMove;
 
 typedef struct {
@@ -32,13 +34,15 @@ typedef struct {
 
 void editor_init(Editor *editor, TextBuffer *buffer);
 bool editor_move(Editor *editor, EditorMove move);
-bool editor_insert_character(Editor *editor, uint8_t value);
+bool editor_insert_character(Editor *editor, uint32_t value);
 bool editor_insert_newline(Editor *editor);
 bool editor_insert_tab(Editor *editor);
 bool editor_backspace(Editor *editor);
 bool editor_delete(Editor *editor);
 bool editor_go_to_line(Editor *editor, const char *expression);
 
+/* Returns UTF-8 byte length, 0 at EOF, or 1 with U+FFFD for a malformed byte. */
+size_t editor_character_at(const Editor *editor, size_t offset, uint32_t *value);
 size_t editor_line_number(const Editor *editor);
 size_t editor_column(const Editor *editor);
 size_t editor_line_start(const Editor *editor, size_t offset);

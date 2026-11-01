@@ -10,8 +10,8 @@
 
 typedef struct {
     const t_key *key;
-    uint8_t normal;
-    uint8_t shifted;
+    uint32_t normal;
+    uint32_t shifted;
 } CharacterKey;
 static bool control_latched;
 static bool shift_latched;
@@ -29,7 +29,7 @@ static bool pressed(const t_key *key) {
     return (isKeyPressed)(key);
 }
 
-static InputEvent event(InputAction action, uint8_t character) {
+static InputEvent event(InputAction action, uint32_t character) {
     InputEvent result;
     result.action = action;
     result.character = character;
@@ -59,10 +59,15 @@ static InputEvent read_character(bool shift) {
         {&KEY_NSPIRE_SPACE, ' ', ' '}, {&KEY_NSPIRE_PERIOD, '.', '>'},
         {&KEY_NSPIRE_COMMA, ',', '<'}, {&KEY_NSPIRE_PLUS, '+', '+'},
         {&KEY_NSPIRE_MINUS, '-', '_'}, {&KEY_NSPIRE_MULTIPLY, '*', '~'},
-        {&KEY_NSPIRE_DIVIDE, '/', '\\'}, {&KEY_NSPIRE_LP, '[', '{'},
-        {&KEY_NSPIRE_RP, ']', '}'}, {&KEY_NSPIRE_EQU, '=', '`'},
+        {&KEY_NSPIRE_DIVIDE, '/', '\\'}, {&KEY_NSPIRE_LP, '(', '{'},
+        {&KEY_NSPIRE_RP, ')', '}'}, {&KEY_NSPIRE_EQU, '=', '`'},
         {&KEY_NSPIRE_APOSTROPHE, '\'', '"'}, {&KEY_NSPIRE_COLON, ':', ';'},
-        {&KEY_NSPIRE_BAR, '|', '\\'}, {&KEY_NSPIRE_QUES, '?', '!'}
+        {&KEY_NSPIRE_BAR, '|', '\\'}, {&KEY_NSPIRE_QUES, '?', '!'},
+        {&KEY_NSPIRE_QUESEXCL, '?', '!'}, {&KEY_NSPIRE_QUOTE, '"', '\''},
+        {&KEY_NSPIRE_PI, 0x03c0, 0x03a0}, {&KEY_NSPIRE_EE, 'e', 'E'},
+        {&KEY_NSPIRE_NEGATIVE, '-', '_'}, {&KEY_NSPIRE_EXP, '^', '^'},
+        {&KEY_NSPIRE_SQU, 0x00b2, 0x221a}, {&KEY_NSPIRE_FRAC, '/', 0x00f7},
+        {&KEY_NSPIRE_THETA, 0x03b8, 0x0398}
     };
     size_t index;
     for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
@@ -91,6 +96,10 @@ static InputEvent read_unmodified(bool shift) {
     if (pressed(&KEY_NSPIRE_DEL)) return event(INPUT_BACKSPACE, 0);
     if (pressed(&KEY_NSPIRE_MENU)) return event(INPUT_MENU, 0);
     if (pressed(&KEY_NSPIRE_ESC)) return event(INPUT_EXIT, 0);
+    if (pressed(&KEY_NSPIRE_CAT) || pressed(&KEY_NSPIRE_TRIG) ||
+        pressed(&KEY_NSPIRE_VAR)) {
+        return event(INPUT_SYMBOLS, 0);
+    }
     return read_character(shift);
 }
 
@@ -175,6 +184,15 @@ static InputEvent scan_input(bool *complete) {
         }
         if (pressed(&KEY_NSPIRE_RIGHT)) {
             return complete_control_event(event(INPUT_END, 0), complete);
+        }
+        if (pressed(&KEY_NSPIRE_UP)) {
+            return complete_control_event(event(INPUT_DOCUMENT_HOME, 0), complete);
+        }
+        if (pressed(&KEY_NSPIRE_DOWN)) {
+            return complete_control_event(event(INPUT_DOCUMENT_END, 0), complete);
+        }
+        if (pressed(&KEY_NSPIRE_DEL)) {
+            return complete_control_event(event(INPUT_DELETE, 0), complete);
         }
 
         plain = read_unmodified(shift);

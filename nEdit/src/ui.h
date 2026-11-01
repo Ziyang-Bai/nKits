@@ -2,6 +2,7 @@
 #define NEDIT_UI_H
 
 #include "editor.h"
+#include "input.h"
 
 #include <stdbool.h>
 
@@ -17,7 +18,8 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
 void ui_message(const char *title, const char *message);
 int ui_confirm_save(Ui *ui);
 char *ui_prompt(const char *title, const char *label, const char *initial);
-char *ui_choose_file(Ui *ui, const char *initial_path, bool *create);
-void ui_show_menu(Ui *ui);
+char *ui_choose_file(Ui *ui, const char *initial_path, bool *create, bool home);
+InputAction ui_show_menu(Ui *ui);
+uint32_t ui_choose_symbol(Ui *ui);
 
 #endif

@@ -14,6 +14,8 @@ typedef enum {
     INPUT_HOME,
     INPUT_NEW,
     INPUT_END,
+    INPUT_DOCUMENT_HOME,
+    INPUT_DOCUMENT_END,
     INPUT_OPEN,
     INPUT_SAVE,
     INPUT_SAVE_AS,
@@ -24,6 +26,8 @@ typedef enum {
     INPUT_CAPS_LOCK,
     INPUT_STICKY_KEYS,
     INPUT_BACKSPACE,
+    INPUT_DELETE,
+    INPUT_SYMBOLS,
     INPUT_MENU,
     INPUT_EXIT,
     INPUT_CHARACTER
@@ -31,7 +35,7 @@ typedef enum {
 
 typedef struct {
     InputAction action;
-    uint8_t character;
+    uint32_t character;
 } InputEvent;
 
 InputEvent input_read(void);

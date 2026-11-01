@@ -53,9 +53,15 @@ build/test_input: tests/test_input.c tests/libndls.h src/input.c src/input.h
 	$(HOST_CC) -std=c99 -Wall -Wextra -Werror -Itests -Isrc \
 		tests/test_input.c src/input.c -o $@
 
-host-test: build/test_editor build/test_input
+build/test_app: tests/test_app.c tests/libndls.h src/app.c src/app.h src/ui.h src/input.h src/editor.c src/editor.h src/text_buffer.c src/text_buffer.h
+	mkdir -p build
+	$(HOST_CC) -std=c99 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Werror -Itests -Isrc \
+		tests/test_app.c src/app.c src/editor.c src/text_buffer.c -o $@
+
+host-test: build/test_editor build/test_input build/test_app
 	./build/test_editor
 	./build/test_input
+	./build/test_app
 
 clean:
 	rm -f $(OBJECTS) $(TARGET).elf $(TARGET).tns $(TARGET).tns.zehn

@@ -22,6 +22,93 @@ static void draw_text(int x, int y, const char *text, int background, int foregr
     nio_vram_pixel_puts(x, y, text, background, foreground);
 }
 
+typedef struct {
+    uint32_t value;
+    const char *name;
+    uint8_t rows[7];
+} Symbol;
+
+static const Symbol symbols[] = {
+    {0x03b1, "alpha",   {0,0,13,18,18,18,13}},
+    {0x03b2, "beta",    {12,18,18,28,18,18,28}},
+    {0x03b3, "gamma",   {0,0,17,17,10,4,4}},
+    {0x03b4, "delta",   {6,8,4,14,17,17,14}},
+    {0x03b5, "epsilon", {0,0,14,16,12,16,14}},
+    {0x03b6, "zeta",    {31,2,4,8,16,14,2}},
+    {0x03b7, "eta",     {0,0,22,25,17,1,1}},
+    {0x03b8, "theta",   {14,17,17,31,17,17,14}},
+    {0x03b9, "iota",    {0,4,0,4,4,4,6}},
+    {0x03ba, "kappa",   {0,0,18,20,24,20,18}},
+    {0x03bb, "lambda",  {16,8,8,12,10,18,17}},
+    {0x03bc, "mu",      {0,0,18,18,18,29,16}},
+    {0x03bd, "nu",      {0,0,17,17,18,20,8}},
+    {0x03be, "xi",      {14,16,14,8,14,1,14}},
+    {0x03bf, "omicron", {0,0,14,17,17,17,14}},
+    {0x03c0, "pi",      {0,0,31,10,10,10,11}},
+    {0x03c1, "rho",     {0,14,17,17,30,16,16}},
+    {0x03c3, "sigma",   {0,0,15,18,17,17,14}},
+    {0x03c4, "tau",     {0,0,31,4,4,4,3}},
+    {0x03c5, "upsilon", {0,0,17,17,17,17,14}},
+    {0x03c6, "phi",     {4,4,14,21,21,14,4}},
+    {0x03c7, "chi",     {0,17,10,4,10,17,0}},
+    {0x03c8, "psi",     {4,21,21,21,14,4,4}},
+    {0x03c9, "omega",   {0,0,17,17,21,21,10}},
+    {0x0393, "Gamma",   {31,16,16,16,16,16,16}},
+    {0x0394, "Delta",   {4,4,10,10,17,17,31}},
+    {0x0398, "Theta",   {14,17,17,21,17,17,14}},
+    {0x039b, "Lambda",  {4,4,10,10,17,17,17}},
+    {0x039e, "Xi",      {31,0,0,14,0,0,31}},
+    {0x03a0, "Pi",      {31,17,17,17,17,17,17}},
+    {0x03a3, "Sigma",   {31,16,8,4,8,16,31}},
+    {0x03a6, "Phi",     {4,14,21,21,21,14,4}},
+    {0x03a8, "Psi",     {21,21,21,14,4,4,4}},
+    {0x03a9, "Omega",   {14,17,17,17,10,10,27}},
+    {0x00b0, "degree",  {6,9,9,6,0,0,0}},
+    {0x00b1, "plus/minus", {0,4,4,31,4,0,31}},
+    {0x00b2, "squared", {12,2,4,8,14,0,0}},
+    {0x00b3, "cubed",   {12,2,4,2,12,0,0}},
+    {0x00d7, "multiply",{0,17,10,4,10,17,0}},
+    {0x00f7, "divide",  {0,4,0,31,0,4,0}},
+    {0x221a, "square root", {0,7,4,4,20,12,4}},
+    {0x221e, "infinity",{0,0,10,21,21,10,0}},
+    {0x2264, "less/equal", {2,4,8,16,8,4,31}},
+    {0x2265, "greater/equal", {8,4,2,1,2,4,31}},
+    {0x2260, "not equal", {0,2,31,4,31,8,0}},
+    {0x2248, "approximate", {0,9,22,0,9,22,0}},
+    {0x222b, "integral",{6,8,8,8,8,8,16}},
+    {0x2202, "partial", {12,2,1,15,17,17,14}},
+    {0x2207, "nabla",   {31,17,17,10,10,4,4}},
+    {0x2211, "sum",     {31,16,8,4,8,16,31}},
+    {0x220f, "product", {31,10,10,10,10,10,10}},
+    {0x2190, "left arrow", {0,4,8,31,8,4,0}},
+    {0x2192, "right arrow", {0,4,2,31,2,4,0}},
+    {0x21d2, "implies", {0,4,2,31,2,31,4}},
+    {0x00b7, "middle dot", {0,0,0,4,0,0,0}}
+};
+
+static void draw_character(int x, int y, uint32_t value, int bg, int fg) {
+    size_t index;
+    char text[2] = {'?', '\0'};
+    if (value >= 0x20 && value <= 0x7e) {
+        text[0] = (char)value;
+    } else if (value == '\t') {
+        text[0] = ' ';
+    } else {
+        for (index = 0; index < sizeof(symbols) / sizeof(symbols[0]); ++index) {
+            if (symbols[index].value == value) {
+                unsigned row, column;
+                nio_vram_fill(x, y, 6, 8, bg);
+                for (row = 0; row < 7; ++row)
+                    for (column = 0; column < 5; ++column)
+                        if (symbols[index].rows[row] & (16u >> column))
+                            nio_vram_fill(x + column, y + row, 1, 1, fg);
+                return;
+            }
+        }
+    }
+    draw_text(x, y, text, bg, fg);
+}
+
 static const char *base_name(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash ? slash + 1 : path;
@@ -51,28 +138,25 @@ static size_t line_number_at(const Editor *editor, size_t offset) {
     return line;
 }
 
-static void draw_editor_row(Editor *editor, size_t line_offset, size_t line_number, int y) {
+static void draw_editor_row(Editor *editor, size_t line_offset, size_t line_number,
+                            size_t cursor_line, size_t cursor_column, int y) {
     size_t line_end = editor_line_end(editor, line_offset);
-    size_t cursor_line = editor_line_start(editor, editor->cursor_offset);
-    size_t cursor_column = editor->cursor_offset - cursor_line;
-    size_t column;
+    size_t column, offset = line_offset;
+    uint32_t value;
     char number[8];
 
     snprintf(number, sizeof(number), "%5lu", (unsigned long)line_number);
     draw_text(2, y, number, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+    for (column = 0; column < editor->left_column && offset < line_end; ++column)
+        offset += editor_character_at(editor, offset, &value);
     for (column = 0; column < NEDIT_VISIBLE_COLUMNS; ++column) {
         size_t logical_column = editor->left_column + column;
-        size_t offset = line_offset + logical_column;
         bool cursor = cursor_line == line_offset && cursor_column == logical_column;
         int background = cursor ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
         int foreground = cursor ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-        char cell[2] = {' ', '\0'};
-        uint8_t value;
-        if (offset < line_end && text_buffer_get(editor->buffer, offset, &value)) {
-            cell[0] = value >= 0x20 && value <= 0x7e ? (char)value :
-                      value == '\t' ? ' ' : '.';
-        }
-        draw_text(TEXT_X + (int)column * 6, y, cell, background, foreground);
+        value = ' ';
+        if (offset < line_end) offset += editor_character_at(editor, offset, &value);
+        draw_character(TEXT_X + (int)column * 6, y, value, background, foreground);
     }
 }
 
@@ -82,6 +166,7 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
     size_t size;
     size_t line_offset;
     size_t line_number;
+    size_t cursor_line, cursor_column;
     unsigned row;
     char text[128];
     bool done = false;
@@ -89,6 +174,8 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
     if (!ui || !ui->initialized || !editor) return;
     buffer = editor->buffer;
     size = text_buffer_size(buffer);
+    cursor_line = editor_line_start(editor, editor->cursor_offset);
+    cursor_column = editor_column(editor);
     nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
 
     snprintf(text, sizeof(text), "nEdit - %.30s", base_name(text_buffer_path(buffer)));
@@ -102,7 +189,7 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
 
     snprintf(text, sizeof(text), "Ln:%lu Col:%lu Off:%lu Size:%lu INS",
              (unsigned long)editor_line_number(editor),
-             (unsigned long)(editor_column(editor) + 1),
+             (unsigned long)(cursor_column + 1),
              (unsigned long)editor->cursor_offset,
              (unsigned long)size);
     draw_text(2, 13, text, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
@@ -113,7 +200,8 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
     line_number = line_number_at(editor, line_offset);
     for (row = 0; row < NEDIT_VISIBLE_ROWS && !done; ++row) {
         size_t next;
-        draw_editor_row(editor, line_offset, line_number, BODY_Y + (int)row * BODY_ROW_HEIGHT);
+        draw_editor_row(editor, line_offset, line_number, cursor_line, cursor_column,
+                        BODY_Y + (int)row * BODY_ROW_HEIGHT);
         next = editor_next_line(editor, line_offset);
         if (next == line_offset) {
             done = true;
@@ -128,7 +216,7 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
         snprintf(text, sizeof(text), "%.52s", message);
         draw_text(2, 220, text, NIO_COLOR_WHITE, NIO_COLOR_BLUE);
     } else {
-        draw_text(2, 220, "Ctrl+S save Ctrl+O open Menu help",
+        draw_text(2, 220, "Ctrl+S save/back Menu actions Esc home",
                   NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
     }
     nio_vram_draw();
@@ -355,14 +443,20 @@ static int wait_information_key(void) {
 
 static void draw_information_page(bool about) {
     static const char *help[] = {
-        "Navigation", "Arrows        Move cursor", "Shift+Up/Dn   Page up/down",
-        "Ctrl+Left     Row start", "Ctrl+Right    Row end", "Editing",
+        "Arrows        Move cursor", "Shift+Up/Dn   Page up/down",
+        "Ctrl+Left/Rt  Row start/end", "Ctrl+Up/Down  Document start/end",
         "Ctrl+Shift    Caps Lock", "Ctrl x5       Sticky Keys",
-        "Enter         New line", "Del           Backspace", "Tab           4 spaces",
-        "Files", "Ctrl+N        Create file", "Ctrl+O        Open",
-        "Ctrl+S        Save", "Ctrl+Shift+S  Save As", "Ctrl+R        Reload",
-        "Ctrl+G        Go To Line", "Menu          Help / About",
-        "Esc           Cancel / Exit"
+        "Enter / Tab   New line / 4 spaces",
+        "Del/Ctrl+Del  Backspace/Delete next",
+        "Catalog/Trig/Var  Symbols", "Pi / Shift+Pi    pi / Pi",
+        "x^2 / Shift+x^2  squared / root",
+        "Shift+0..9    ) ! @ # $ % ^ & * (",
+        "Ctrl+N        Create file", "Ctrl+O        Open",
+        "Ctrl+S        Save, return home",
+        "Ctrl+Shift+S  Save As, return home",
+        "Ctrl+R        Reload", "Ctrl+G        Go To Line",
+        "Menu          Editing actions",
+        "Esc           Home; Esc at home exits"
     };
     static const char *about_lines[] = {
         "nEdit", "Native plain-text editor", "", "TI-Nspire CX / CX II",
@@ -378,8 +472,7 @@ static void draw_information_page(bool about) {
     draw_text(284, 3, about ? "2/2" : "1/2", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
     nio_vram_fill(0, 17, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
     for (index = 0; index < count; ++index) {
-        bool heading = !about && (!strcmp(lines[index], "Navigation") || !strcmp(lines[index], "Editing") || !strcmp(lines[index], "Files"));
-        draw_text(6, 24 + (int)index * 9, lines[index], NIO_COLOR_WHITE, heading ? NIO_COLOR_BLUE : NIO_COLOR_BLACK);
+        draw_text(6, 24 + (int)index * 9, lines[index], NIO_COLOR_WHITE, NIO_COLOR_BLACK);
     }
     nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
     draw_text(2, 220, "Left/Right switch Enter/Esc back", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
@@ -399,7 +492,7 @@ static void show_information(Ui *ui, bool about) {
     }
 }
 
-static void draw_open_menu(unsigned selected) {
+static void draw_open_menu(unsigned selected, bool home) {
     static const char *options[] = {
         "1  Browse files", "2  Enter path", "3  Create file",
         "4  Help", "5  About nEdit", "6  Cancel"
@@ -414,10 +507,11 @@ static void draw_open_menu(unsigned selected) {
         int bg = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
         int fg = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
         nio_vram_fill(20, (unsigned)(y - 6), 280, 24, (unsigned)bg);
-        draw_text(30, y, options[index], bg, fg);
+        draw_text(30, y, home && index == 5 ? "6  Exit nEdit" : options[index], bg, fg);
     }
     nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(2, 220, "Up/Down choose Enter select Esc cancel", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+    draw_text(2, 220, home ? "Up/Down choose Enter select Esc exit" :
+              "Up/Down choose Enter select Esc cancel", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
     nio_vram_draw();
 }
 
@@ -437,13 +531,13 @@ static int wait_open_key(void) {
     }
 }
 
-char *ui_choose_file(Ui *ui, const char *initial_path, bool *create) {
+char *ui_choose_file(Ui *ui, const char *initial_path, bool *create, bool home) {
     unsigned selected = 0;
     if (create) *create = false;
     for (;;) {
         char *path;
         int action;
-        draw_open_menu(selected);
+        draw_open_menu(selected, home);
         action = wait_open_key();
         wait_no_key_pressed();
         if (action == -1) { selected = selected ? selected - 1 : 5; continue; }
@@ -470,9 +564,111 @@ char *ui_choose_file(Ui *ui, const char *initial_path, bool *create) {
     }
 }
 
-void ui_show_menu(Ui *ui) {
-    int choice;
-    if (!ui || !ui->initialized) return;
-    choice = (int)show_msgbox_3b("nEdit", "Information", "Help", "About", "Cancel");
-    if (choice == 1 || choice == 2) show_information(ui, choice == 2);
+InputAction ui_show_menu(Ui *ui) {
+    static const struct {
+        const char *label;
+        InputAction action;
+    } items[] = {
+        {"Insert symbol             Catalog", INPUT_SYMBOLS},
+        {"Save and return home      Ctrl+S", INPUT_SAVE},
+        {"Save As and return home", INPUT_SAVE_AS},
+        {"Open file                 Ctrl+O", INPUT_OPEN},
+        {"Create file               Ctrl+N", INPUT_NEW},
+        {"Reload                    Ctrl+R", INPUT_RELOAD},
+        {"Go To Line                Ctrl+G", INPUT_GOTO},
+        {"Delete next character     Ctrl+Del", INPUT_DELETE},
+        {"Document start            Ctrl+Up", INPUT_DOCUMENT_HOME},
+        {"Document end              Ctrl+Down", INPUT_DOCUMENT_END},
+        {"Help", INPUT_NONE},
+        {"About", INPUT_NONE},
+        {"Return home               Esc", INPUT_EXIT}
+    };
+    unsigned selected = 0;
+    unsigned count = sizeof(items) / sizeof(items[0]);
+    if (!ui || !ui->initialized) return INPUT_NONE;
+    for (;;) {
+        unsigned index;
+        int key;
+        nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
+        draw_text(2, 4, "nEdit - Edit menu", NIO_COLOR_WHITE, NIO_COLOR_BLACK);
+        for (index = 0; index < count; ++index) {
+            int bg = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
+            int fg = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
+            nio_vram_fill(4, 26 + index * 14, 312, 13, bg);
+            draw_text(8, 28 + index * 14, items[index].label, bg, fg);
+        }
+        draw_text(2, 220, "Up/Down choose Enter select Esc back",
+                  NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+        nio_vram_draw();
+        key = wait_browser_key();
+        wait_no_key_pressed();
+        if (key == 1) selected = selected ? selected - 1 : count - 1;
+        else if (key == 2) selected = (selected + 1) % count;
+        else if (key == 4) return INPUT_NONE;
+        else if (key == 3) {
+            if (items[selected].action != INPUT_NONE) return items[selected].action;
+            show_information(ui, selected == 11);
+        }
+    }
+}
+
+static InputAction wait_symbol_key(void) {
+    for (;;) {
+        if (isKeyPressed(KEY_NSPIRE_LEFT)) return INPUT_LEFT;
+        if (isKeyPressed(KEY_NSPIRE_RIGHT)) return INPUT_RIGHT;
+        if (isKeyPressed(KEY_NSPIRE_UP)) return INPUT_UP;
+        if (isKeyPressed(KEY_NSPIRE_DOWN)) return INPUT_DOWN;
+        if (isKeyPressed(KEY_NSPIRE_TAB)) return INPUT_TAB;
+        if (isKeyPressed(KEY_NSPIRE_RET) || isKeyPressed(KEY_NSPIRE_ENTER) ||
+            isKeyPressed(KEY_NSPIRE_CLICK)) return INPUT_NEWLINE;
+        if (isKeyPressed(KEY_NSPIRE_ESC) || isKeyPressed(KEY_NSPIRE_MENU)) return INPUT_EXIT;
+        msleep(10);
+    }
+}
+
+uint32_t ui_choose_symbol(Ui *ui) {
+    static const char punctuation[] = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+    const unsigned punctuation_count = sizeof(punctuation) - 1;
+    const unsigned count = punctuation_count + sizeof(symbols) / sizeof(symbols[0]);
+    unsigned selected = 0;
+    if (!ui || !ui->initialized) return 0;
+    for (;;) {
+        unsigned index, start = selected / 24 * 24;
+        InputAction key;
+        char label[80];
+        uint32_t value = selected < punctuation_count ? (uint8_t)punctuation[selected] :
+                         symbols[selected - punctuation_count].value;
+        nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
+        snprintf(label, sizeof(label), "Symbols  %u/%u", selected / 24 + 1, (count + 23) / 24);
+        draw_text(2, 4, label, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
+        for (index = start; index < start + 24 && index < count; ++index) {
+            int x = 10 + (index - start) % 6 * 51;
+            int y = 34 + (index - start) / 6 * 36;
+            int bg = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
+            int fg = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
+            uint32_t code = index < punctuation_count ? (uint8_t)punctuation[index] :
+                            symbols[index - punctuation_count].value;
+            nio_vram_fill(x, y, 44, 28, bg);
+            draw_character(x + 19, y + 10, code, bg, fg);
+        }
+        snprintf(label, sizeof(label), "U+%04lX  %s", (unsigned long)value,
+                 selected < punctuation_count ? "Punctuation" : symbols[selected - punctuation_count].name);
+        draw_text(8, 188, label, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
+        draw_text(2, 212, "Arrows choose Tab page Enter insert", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+        draw_text(2, 225, "Esc cancel", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+        nio_vram_draw();
+        key = wait_symbol_key();
+        wait_no_key_pressed();
+        switch (key) {
+            case INPUT_LEFT: selected = selected ? selected - 1 : count - 1; break;
+            case INPUT_RIGHT: selected = (selected + 1) % count; break;
+            case INPUT_UP: selected = selected >= 6 ? selected - 6 : selected; break;
+            case INPUT_DOWN: if (selected + 6 < count) selected += 6; break;
+            case INPUT_TAB: selected = start + 24 < count ? start + 24 : 0; break;
+            case INPUT_NEWLINE: return value;
+            case INPUT_EXIT:
+            case INPUT_MENU: return 0;
+            default: break;
+        }
+    }
 }

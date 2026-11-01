@@ -108,7 +108,7 @@ static bool test_edit_navigation_and_save(void) {
     memset(long_line, 'x', sizeof(long_line) - 1);
     long_line[sizeof(long_line) - 1] = '\0';
     for (index = 0; index < sizeof(long_line) - 1; ++index)
-        CHECK(editor_insert_character(&editor, (uint8_t)long_line[index]));
+        CHECK(editor_insert_character(&editor, (uint32_t)long_line[index]));
     CHECK(editor.left_column > 0);
     CHECK(text_buffer_delete(&buffer, editor.cursor_offset - 10, 10));
     editor.cursor_offset -= 10;
@@ -163,9 +163,242 @@ static bool test_create_arbitrary_extension(void) {
     return true;
 }
 
+static bool test_unicode_edit_and_save(void) {
+    static const uint32_t scalars[] = {'A', 0x03b1, 0x2264, 0x1f642, '!'};
+    static const size_t offsets[] = {0, 1, 3, 6, 10, 11};
+    static const uint32_t invalid[] = {0, '\n', 0x1f, 0x7f, 0x9f, 0xd800, 0xdfff,
+                                       0x110000, UINT32_MAX};
+    static const char text[] = "A\xce\xb1\xe2\x89\xa4\xf0\x9f\x99\x82!";
+    TextBuffer buffer;
+    Editor editor;
+    uint32_t value;
+    size_t index;
+
+    CHECK(write_fixture(INPUT_PATH, ""));
+    CHECK(text_buffer_open(&buffer, INPUT_PATH));
+    editor_init(&editor, &buffer);
+    for (index = 0; index < sizeof(invalid) / sizeof(invalid[0]); ++index) {
+        CHECK(!editor_insert_character(&editor, invalid[index]));
+        CHECK(editor.cursor_offset == 0 && editor.preferred_column == 0);
+        CHECK(text_buffer_size(&buffer) == 0 && !text_buffer_modified(&buffer));
+    }
+    for (index = 0; index < sizeof(scalars) / sizeof(scalars[0]); ++index) {
+        CHECK(editor_insert_character(&editor, scalars[index]));
+        CHECK(editor.cursor_offset == offsets[index + 1]);
+        CHECK(editor_column(&editor) == index + 1);
+        CHECK(editor_character_at(&editor, offsets[index], &value) ==
+              offsets[index + 1] - offsets[index]);
+        CHECK(value == scalars[index]);
+    }
+    CHECK(editor_character_at(&editor, sizeof(text) - 1, &value) == 0);
+    CHECK(expect_buffer(&buffer, text));
+    CHECK(text_buffer_save(&buffer));
+    CHECK(expect_file(INPUT_PATH, text));
+    for (index = 5; index > 0; --index) {
+        CHECK(editor_move(&editor, EDIT_MOVE_LEFT));
+        CHECK(editor.cursor_offset == offsets[index - 1]);
+        CHECK(editor_column(&editor) == index - 1);
+    }
+    CHECK(!editor_move(&editor, EDIT_MOVE_LEFT));
+    for (index = 1; index <= 5; ++index) {
+        CHECK(editor_move(&editor, EDIT_MOVE_RIGHT));
+        CHECK(editor.cursor_offset == offsets[index]);
+    }
+    CHECK(!editor_move(&editor, EDIT_MOVE_RIGHT));
+    CHECK(editor_move(&editor, EDIT_MOVE_LEFT));
+    CHECK(editor_backspace(&editor));
+    CHECK(editor.cursor_offset == 6 && editor_column(&editor) == 3);
+    CHECK(expect_buffer(&buffer, "A\xce\xb1\xe2\x89\xa4!"));
+    CHECK(editor_move(&editor, EDIT_MOVE_LEFT));
+    CHECK(editor_delete(&editor));
+    CHECK(editor.cursor_offset == 3 && editor_column(&editor) == 2);
+    CHECK(expect_buffer(&buffer, "A\xce\xb1!"));
+    CHECK(editor_backspace(&editor));
+    CHECK(editor.cursor_offset == 1 && editor_column(&editor) == 1);
+    CHECK(expect_buffer(&buffer, "A!"));
+    CHECK(editor_insert_character(&editor, 0x03b2));
+    CHECK(text_buffer_save(&buffer));
+    CHECK(expect_file(INPUT_PATH, "A\xce\xb2!"));
+    CHECK(editor_move(&editor, EDIT_MOVE_DOCUMENT_HOME));
+    CHECK(!editor_backspace(&editor));
+    CHECK(editor_move(&editor, EDIT_MOVE_DOCUMENT_END));
+    CHECK(!editor_delete(&editor));
+    text_buffer_close(&buffer);
+    remove(INPUT_PATH);
+    return true;
+}
+
+static bool test_utf8_boundaries(void) {
+    static const struct {
+        const char *text;
+        uint32_t scalar;
+        size_t length;
+    } cases[] = {
+        {"\x7f", 0x7f, 1},
+        {"\xc2\x80", 0x80, 2},
+        {"\xdf\xbf", 0x7ff, 2},
+        {"\xe0\xa0\x80", 0x800, 3},
+        {"\xed\x9f\xbf", 0xd7ff, 3},
+        {"\xee\x80\x80", 0xe000, 3},
+        {"\xef\xbf\xbf", 0xffff, 3},
+        {"\xf0\x90\x80\x80", 0x10000, 4},
+        {"\xf4\x8f\xbf\xbf", 0x10ffff, 4},
+        {"\xc0\xaf", 0xfffd, 1},
+        {"\xc1\xbf", 0xfffd, 1},
+        {"\xe0\x9f\xbf", 0xfffd, 1},
+        {"\xed\xa0\x80", 0xfffd, 1},
+        {"\xed\xbf\xbf", 0xfffd, 1},
+        {"\xf0\x8f\xbf\xbf", 0xfffd, 1},
+        {"\xf4\x90\x80\x80", 0xfffd, 1},
+        {"\xf5\x80\x80\x80", 0xfffd, 1},
+        {"\xff", 0xfffd, 1},
+        {"\xfe", 0xfffd, 1},
+        {"\x80", 0xfffd, 1},
+        {"\xbf", 0xfffd, 1},
+        {"\xc2", 0xfffd, 1},
+        {"\xe2\x82", 0xfffd, 1},
+        {"\xf0\x9f\x92", 0xfffd, 1},
+        {"\xe2(\xa1", 0xfffd, 1},
+        {"\xc2\n", 0xfffd, 1}
+    };
+    TextBuffer buffer;
+    Editor editor;
+    uint32_t value;
+    size_t index;
+
+    for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+        CHECK(write_fixture(INPUT_PATH, cases[index].text));
+        CHECK(text_buffer_open(&buffer, INPUT_PATH));
+        editor_init(&editor, &buffer);
+        CHECK(editor_character_at(&editor, 0, &value) == cases[index].length);
+        CHECK(value == cases[index].scalar);
+        CHECK(editor_move(&editor, EDIT_MOVE_RIGHT));
+        CHECK(editor.cursor_offset == cases[index].length);
+        CHECK(editor_column(&editor) == 1);
+        CHECK(editor_move(&editor, EDIT_MOVE_LEFT));
+        CHECK(editor.cursor_offset == 0);
+        text_buffer_close(&buffer);
+    }
+    remove(INPUT_PATH);
+    return true;
+}
+
+static bool test_malformed_bytes(void) {
+    static const char text[] = "\xc0\xaf\xe0\x80\x80\xed\xa0\x80\xf4\x90\x80\x80"
+                               "\xff\x80\xc2\n\xe2\x82";
+    TextBuffer buffer;
+    Editor editor;
+    uint32_t value;
+    size_t index;
+
+    CHECK(write_fixture(INPUT_PATH, text));
+    CHECK(text_buffer_open(&buffer, INPUT_PATH));
+    editor_init(&editor, &buffer);
+    for (index = 0; index < sizeof(text) - 1; ++index) {
+        CHECK(editor_character_at(&editor, index, &value) == 1);
+        CHECK(value == (text[index] == '\n' ? '\n' : 0xfffd));
+        CHECK(editor_move(&editor, EDIT_MOVE_RIGHT));
+        CHECK(editor.cursor_offset == index + 1);
+    }
+    CHECK(editor_insert_character(&editor, '!'));
+    CHECK(text_buffer_save(&buffer));
+    CHECK(expect_file(INPUT_PATH, "\xc0\xaf\xe0\x80\x80\xed\xa0\x80\xf4\x90\x80\x80"
+                                  "\xff\x80\xc2\n\xe2\x82!"));
+    CHECK(editor_backspace(&editor));
+    for (index = sizeof(text) - 1; index > 0; --index) {
+        CHECK(editor_move(&editor, EDIT_MOVE_LEFT));
+        CHECK(editor.cursor_offset == index - 1);
+    }
+    CHECK(editor_delete(&editor));
+    CHECK(editor.cursor_offset == 0);
+    CHECK(expect_buffer(&buffer, text + 1));
+    CHECK(editor_move(&editor, EDIT_MOVE_DOCUMENT_END));
+    CHECK(editor_backspace(&editor));
+    CHECK(expect_buffer(&buffer, "\xaf\xe0\x80\x80\xed\xa0\x80\xf4\x90\x80\x80"
+                                "\xff\x80\xc2\n\xe2"));
+    CHECK(text_buffer_save(&buffer));
+    CHECK(expect_file(INPUT_PATH, "\xaf\xe0\x80\x80\xed\xa0\x80\xf4\x90\x80\x80"
+                                  "\xff\x80\xc2\n\xe2"));
+    text_buffer_close(&buffer);
+
+    CHECK(write_fixture(INPUT_PATH, "\xce\n\xb1"));
+    CHECK(text_buffer_open(&buffer, INPUT_PATH));
+    editor_init(&editor, &buffer);
+    CHECK(editor_move(&editor, EDIT_MOVE_DOWN));
+    CHECK(editor_backspace(&editor));
+    CHECK(expect_buffer(&buffer, "\xce\xb1"));
+    CHECK(editor.cursor_offset == 0 && editor_column(&editor) == 0);
+    CHECK(editor_delete(&editor));
+    CHECK(expect_buffer(&buffer, ""));
+    text_buffer_close(&buffer);
+
+    CHECK(write_fixture(INPUT_PATH, "\xe2\x89!\xa4"));
+    CHECK(text_buffer_open(&buffer, INPUT_PATH));
+    editor_init(&editor, &buffer);
+    CHECK(editor_move(&editor, EDIT_MOVE_RIGHT));
+    CHECK(editor_move(&editor, EDIT_MOVE_RIGHT));
+    CHECK(editor_delete(&editor));
+    CHECK(expect_buffer(&buffer, "\xe2\x89\xa4"));
+    CHECK(editor.cursor_offset == 0 && editor_column(&editor) == 0);
+    CHECK(editor_move(&editor, EDIT_MOVE_RIGHT));
+    CHECK(editor.cursor_offset == 3);
+    text_buffer_close(&buffer);
+    remove(INPUT_PATH);
+    return true;
+}
+
+static bool test_unicode_columns(void) {
+    static const char text[] = "A\xce\xb1\xe2\x89\xa4\xf0\x9f\x99\x82\n"
+                               "\xce\xb2\n"
+                               "\xe2\x88\x9e\xce\xb3" "BC\n";
+    TextBuffer buffer;
+    Editor editor;
+    size_t index;
+
+    CHECK(write_fixture(INPUT_PATH, text));
+    CHECK(text_buffer_open(&buffer, INPUT_PATH));
+    editor_init(&editor, &buffer);
+    CHECK(editor_move(&editor, EDIT_MOVE_END));
+    CHECK(editor.cursor_offset == 10 && editor_column(&editor) == 4);
+    CHECK(editor.preferred_column == 4);
+    CHECK(editor_move(&editor, EDIT_MOVE_DOWN));
+    CHECK(editor.cursor_offset == 13 && editor_column(&editor) == 1);
+    CHECK(editor.preferred_column == 4);
+    CHECK(editor_move(&editor, EDIT_MOVE_DOWN));
+    CHECK(editor.cursor_offset == 21 && editor_column(&editor) == 4);
+    CHECK(editor_move(&editor, EDIT_MOVE_DOWN));
+    CHECK(editor.cursor_offset == 22 && editor_column(&editor) == 0);
+    CHECK(editor.preferred_column == 4);
+    CHECK(editor_move(&editor, EDIT_MOVE_PAGE_UP));
+    CHECK(editor.cursor_offset == 10 && editor_column(&editor) == 4);
+    CHECK(editor_move(&editor, EDIT_MOVE_PAGE_DOWN));
+    CHECK(editor.cursor_offset == 22 && editor.preferred_column == 4);
+    CHECK(editor_move(&editor, EDIT_MOVE_DOCUMENT_HOME));
+    CHECK(editor.cursor_offset == 0 && editor.preferred_column == 0);
+    CHECK(!editor_move(&editor, EDIT_MOVE_DOCUMENT_HOME));
+    CHECK(editor_move(&editor, EDIT_MOVE_DOCUMENT_END));
+    CHECK(editor.cursor_offset == sizeof(text) - 1);
+    CHECK(!editor_move(&editor, EDIT_MOVE_DOCUMENT_END));
+    for (index = 0; index < NEDIT_VISIBLE_COLUMNS + 5; ++index)
+        CHECK(editor_insert_character(&editor, 0x03b1));
+    CHECK(editor_column(&editor) == NEDIT_VISIBLE_COLUMNS + 5);
+    CHECK(editor.left_column == 6);
+    CHECK(editor_move(&editor, EDIT_MOVE_HOME));
+    CHECK(editor.cursor_offset == 22 && editor.left_column == 0);
+    CHECK(editor_move(&editor, EDIT_MOVE_END));
+    CHECK(editor.left_column == 6);
+    CHECK(editor_move(&editor, EDIT_MOVE_UP));
+    CHECK(editor.cursor_offset == 21 && editor.left_column == 4);
+    CHECK(editor.preferred_column == NEDIT_VISIBLE_COLUMNS + 5);
+    text_buffer_close(&buffer);
+    remove(INPUT_PATH);
+    return true;
+}
+
 int main(void) {
     if (!test_edit_navigation_and_save() || !test_empty_file() ||
-        !test_create_arbitrary_extension()) return 1;
-    puts("PASS nEdit: gap editing, navigation, viewport, safe save");
+        !test_create_arbitrary_extension() || !test_unicode_edit_and_save() ||
+        !test_utf8_boundaries() || !test_malformed_bytes() || !test_unicode_columns()) return 1;
+    puts("PASS nEdit: UTF-8 editing, navigation, viewport, safe save");
     return 0;
 }

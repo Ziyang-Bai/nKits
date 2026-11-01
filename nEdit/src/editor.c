@@ -8,6 +8,58 @@ static bool byte_at(const Editor *editor, size_t offset, uint8_t *value) {
     return text_buffer_get(editor->buffer, offset, value);
 }
 
+size_t editor_character_at(const Editor *editor, size_t offset, uint32_t *value) {
+    uint8_t first;
+    uint8_t next;
+    uint32_t scalar;
+    uint32_t minimum;
+    size_t length;
+    size_t index;
+
+    if (!byte_at(editor, offset, &first)) return 0;
+    *value = 0xfffd;
+    if (first < 0x80) {
+        *value = first;
+        return 1;
+    }
+    if (first >= 0xc2 && first <= 0xdf) {
+        scalar = first & 0x1f;
+        minimum = 0x80;
+        length = 2;
+    } else if (first >= 0xe0 && first <= 0xef) {
+        scalar = first & 0x0f;
+        minimum = 0x800;
+        length = 3;
+    } else if (first >= 0xf0 && first <= 0xf4) {
+        scalar = first & 0x07;
+        minimum = 0x10000;
+        length = 4;
+    } else {
+        return 1;
+    }
+    if (text_buffer_size(editor->buffer) - offset < length) return 1;
+    for (index = 1; index < length; ++index) {
+        if (!byte_at(editor, offset + index, &next) || (next & 0xc0) != 0x80) return 1;
+        scalar = (scalar << 6) | (next & 0x3f);
+    }
+    if (scalar < minimum || scalar > 0x10ffff ||
+        (scalar >= 0xd800 && scalar <= 0xdfff)) return 1;
+    *value = scalar;
+    return length;
+}
+
+static size_t character_start(const Editor *editor, size_t offset) {
+    uint8_t byte;
+    uint32_t value;
+    size_t distance;
+    if (!byte_at(editor, offset, &byte) || (byte & 0xc0) != 0x80) return offset;
+    for (distance = 1; distance <= 3 && distance <= offset; ++distance) {
+        if (editor_character_at(editor, offset - distance, &value) > distance)
+            return offset - distance;
+    }
+    return offset;
+}
+
 size_t editor_line_start(const Editor *editor, size_t offset) {
     uint8_t value;
     size_t size = text_buffer_size(editor->buffer);
@@ -43,7 +95,16 @@ size_t editor_previous_line(const Editor *editor, size_t offset) {
 }
 
 size_t editor_column(const Editor *editor) {
-    return editor->cursor_offset - editor_line_start(editor, editor->cursor_offset);
+    size_t offset = editor_line_start(editor, editor->cursor_offset);
+    size_t column = 0;
+    uint32_t value;
+    while (offset < editor->cursor_offset) {
+        size_t length = editor_character_at(editor, offset, &value);
+        if (length == 0) break;
+        offset += length;
+        column++;
+    }
+    return column;
 }
 
 size_t editor_line_number(const Editor *editor) {
@@ -102,13 +163,17 @@ static bool move_vertical(Editor *editor, bool down) {
     size_t start = editor_line_start(editor, editor->cursor_offset);
     size_t target_start = down ? editor_next_line(editor, start)
                                : editor_previous_line(editor, start);
-    size_t target_end;
+    size_t column = 0;
+    uint32_t value;
+    size_t length;
     if (target_start == start) return false;
-    target_end = editor_line_end(editor, target_start);
-    editor->cursor_offset = target_start +
-        (editor->preferred_column < target_end - target_start
-             ? editor->preferred_column
-             : target_end - target_start);
+    while (column < editor->preferred_column &&
+           (length = editor_character_at(editor, target_start, &value)) != 0 &&
+           value != '\n') {
+        target_start += length;
+        column++;
+    }
+    editor->cursor_offset = target_start;
     return true;
 }
 
@@ -124,13 +189,14 @@ bool editor_move(Editor *editor, EditorMove move) {
     switch (move) {
         case EDIT_MOVE_LEFT:
             if (editor->cursor_offset > 0) {
-                editor->cursor_offset--;
+                editor->cursor_offset = character_start(editor, editor->cursor_offset - 1);
                 moved = true;
             }
             break;
         case EDIT_MOVE_RIGHT:
             if (editor->cursor_offset < size) {
-                editor->cursor_offset++;
+                uint32_t value;
+                editor->cursor_offset += editor_character_at(editor, editor->cursor_offset, &value);
                 moved = true;
             }
             break;
@@ -146,6 +212,14 @@ bool editor_move(Editor *editor, EditorMove move) {
             editor->cursor_offset = target;
             break;
         }
+        case EDIT_MOVE_DOCUMENT_HOME:
+            moved = editor->cursor_offset != 0;
+            editor->cursor_offset = 0;
+            break;
+        case EDIT_MOVE_DOCUMENT_END:
+            moved = editor->cursor_offset != size;
+            editor->cursor_offset = size;
+            break;
         case EDIT_MOVE_UP:
         case EDIT_MOVE_PAGE_UP:
             for (index = 0; index < count; ++index) {
@@ -169,10 +243,32 @@ bool editor_move(Editor *editor, EditorMove move) {
     return moved;
 }
 
-bool editor_insert_character(Editor *editor, uint8_t value) {
-    if (value < 0x20 || value > 0x7e ||
-        !text_buffer_insert(editor->buffer, editor->cursor_offset, value)) return false;
-    editor->cursor_offset++;
+bool editor_insert_character(Editor *editor, uint32_t value) {
+    uint8_t bytes[4];
+    size_t length;
+    if (value < 0x20 || (value >= 0x7f && value <= 0x9f) ||
+        (value >= 0xd800 && value <= 0xdfff) || value > 0x10ffff) return false;
+    if (value < 0x80) {
+        bytes[0] = (uint8_t)value;
+        length = 1;
+    } else if (value < 0x800) {
+        bytes[0] = (uint8_t)(0xc0 | (value >> 6));
+        bytes[1] = (uint8_t)(0x80 | (value & 0x3f));
+        length = 2;
+    } else if (value < 0x10000) {
+        bytes[0] = (uint8_t)(0xe0 | (value >> 12));
+        bytes[1] = (uint8_t)(0x80 | ((value >> 6) & 0x3f));
+        bytes[2] = (uint8_t)(0x80 | (value & 0x3f));
+        length = 3;
+    } else {
+        bytes[0] = (uint8_t)(0xf0 | (value >> 18));
+        bytes[1] = (uint8_t)(0x80 | ((value >> 12) & 0x3f));
+        bytes[2] = (uint8_t)(0x80 | ((value >> 6) & 0x3f));
+        bytes[3] = (uint8_t)(0x80 | (value & 0x3f));
+        length = 4;
+    }
+    if (!text_buffer_insert_span(editor->buffer, editor->cursor_offset, bytes, length)) return false;
+    editor->cursor_offset += length;
     editor->preferred_column = editor_column(editor);
     editor_ensure_visible(editor);
     return true;
@@ -197,17 +293,23 @@ bool editor_insert_tab(Editor *editor) {
 }
 
 bool editor_backspace(Editor *editor) {
-    if (editor->cursor_offset == 0 ||
-        !text_buffer_delete(editor->buffer, editor->cursor_offset - 1, 1)) return false;
-    editor->cursor_offset--;
+    size_t start;
+    if (editor->cursor_offset == 0) return false;
+    start = character_start(editor, editor->cursor_offset - 1);
+    if (!text_buffer_delete(editor->buffer, start, editor->cursor_offset - start)) return false;
+    /* Deleting between malformed bytes can join them into a valid character. */
+    editor->cursor_offset = character_start(editor, start);
     editor->preferred_column = editor_column(editor);
     editor_ensure_visible(editor);
     return true;
 }
 
 bool editor_delete(Editor *editor) {
-    if (editor->cursor_offset >= text_buffer_size(editor->buffer) ||
-        !text_buffer_delete(editor->buffer, editor->cursor_offset, 1)) return false;
+    uint32_t value;
+    size_t length = editor_character_at(editor, editor->cursor_offset, &value);
+    if (length == 0 ||
+        !text_buffer_delete(editor->buffer, editor->cursor_offset, length)) return false;
+    editor->cursor_offset = character_start(editor, editor->cursor_offset);
     editor->preferred_column = editor_column(editor);
     editor_ensure_visible(editor);
     return true;
