@@ -68,6 +68,13 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: nKits ${{ env.NKITS_VERSION }} - Alpha Testing
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          body: |
+            Alpha Testing build of nKits from ${{ github.repository }}@${{ github.sha }}.
+
+            Download the individual .tns files below. Copyright and license notices are in the corresponding source files; LICENSE is attached.
           files: |
             nHex/nhex.tns
             nEdit/nedit.tns
