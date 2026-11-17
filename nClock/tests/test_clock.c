@@ -44,7 +44,7 @@ static bool test_calendar(void) {
 
 static bool test_format(void) {
     Clock clock;
-    char text[CLOCK_TEXT_SIZE], date[40];
+    char text[CLOCK_TEXT_SIZE];
     clock_defaults(&clock);
     clock_text(&clock, 0, text);
     CHECK(!strcmp(text, "00:00:00"));
@@ -58,10 +58,6 @@ static bool test_format(void) {
     clock.seconds = false;
     clock_text(&clock, 46801, text);
     CHECK(!strcmp(text, "01:00 PM"));
-    clock_date_text(&clock, 0, date);
-    CHECK(!strcmp(date, "Thu 01 Jan 1970"));
-    clock_date_text(&clock, 951782400, date);
-    CHECK(!strcmp(date, "Tue 29 Feb 2000"));
     CHECK(clock_start(&clock, 100, UINT32_MAX));
     clock_text(&clock, 100, text);
     CHECK(!strcmp(text, "49710d 06:28:15"));

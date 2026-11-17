@@ -13,7 +13,8 @@ PYTHON ?= python3
 TARGET := ncapture
 SOURCES := src/main.c src/app.c src/capture.c
 OBJECTS := $(addprefix build/,$(SOURCES:.c=.o)) build/common/resident.o \
-	build/common/resident_gate.o build/common/explorer.o build/common/explorer_gate.o
+	build/common/resident_gate.o build/common/explorer.o build/common/explorer_gate.o \
+	build/common/ui.o build/common/draw.o
 CPPFLAGS := -DNCAPTURE_RESIDENT -DNKITS_VERSION='"$(VERSION)"' -DNKITS_COMMIT='"$(COMMIT)"' \
 	-DNKITS_STAGE='"$(STAGE)"'
 CFLAGS := -std=gnu99 -Wall -Wextra -marm -ffunction-sections -fdata-sections \
@@ -35,7 +36,8 @@ build/resident_build.h: ../common/build_id.py FORCE
 		--flags '$(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(ZEHNFLAGS)' \
 		Makefile $(wildcard src/*.c src/*.h) ../common/resident.c ../common/resident.h \
 		../common/resident_gate.S ../common/explorer.c ../common/explorer.h \
-		../common/explorer_gate.S ../version.h
+		../common/explorer_gate.S ../common/ui.c ../common/ui.h \
+		../common/draw.c ../common/draw.h ../version.h
 
 $(OBJECTS): build/resident_build.h
 
@@ -64,8 +66,15 @@ build/test_capture: tests/test_capture.c src/capture.c src/capture.h
 	$(HOST_CC) -std=c99 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -Isrc \
 		tests/test_capture.c src/capture.c -o $@
 
-host-test: build/test_capture
+build/test_screen: tests/test_screen.c tests/libndls.h ../common/resident.c ../common/resident.h ../common/explorer.h
+	mkdir -p build
+	$(HOST_CC) -std=gnu99 -Wall -Wextra -Werror -Wno-pointer-to-int-cast \
+		-Wno-int-to-pointer-cast -ffunction-sections -fdata-sections -Itests \
+		tests/test_screen.c -Wl,--gc-sections -o $@
+
+host-test: build/test_capture build/test_screen
 	./build/test_capture
+	./build/test_screen
 
 clean:
 	rm -f $(TARGET).elf $(TARGET).tns $(TARGET).tns.zehn

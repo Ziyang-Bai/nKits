@@ -297,7 +297,16 @@ static void write_portrait(const uint16_t *pixels) {
 bool resident_copy_screen(uint16_t pixels[320 * 240]) {
     if (!screen_available()) return false;
     unsigned mask = resident_lock();
-    read_screen(pixels);
+    if (root->platform->buffered) {
+        /* CX II's OS canvas stays in logical order across LCD transitions. */
+        uintptr_t source = root->display_context[1];
+        if (!ram_range(source, 320 * 240 * sizeof(uint16_t))) {
+            resident_unlock(mask);
+            return false;
+        }
+        const volatile uint16_t *screen = (const uint16_t *)source;
+        for (unsigned i = 0; i < 320 * 240; ++i) pixels[i] = screen[i];
+    } else read_screen(pixels);
     resident_unlock(mask);
     return true;
 }

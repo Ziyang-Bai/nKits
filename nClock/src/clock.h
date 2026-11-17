@@ -22,6 +22,7 @@ typedef struct {
     int64_t offset, deadline;
     uint32_t last_raw, previous, timeout;
     unsigned x, y, pending;
+    unsigned language;
     bool hour12, seconds, visible, countdown;
     bool reboot, check_time, flip, warned, foreground, disabled;
 } Clock;
@@ -41,7 +42,6 @@ unsigned clock_alert(Clock *clock);
 unsigned clock_blink(const Clock *clock, uint32_t raw);
 void clock_move(Clock *clock, int dx, int dy);
 void clock_text(const Clock *clock, uint32_t raw, char text[CLOCK_TEXT_SIZE]);
-void clock_date_text(const Clock *clock, uint32_t raw, char text[40]);
 void clock_draw(const Clock *clock, uint32_t raw, volatile uint16_t *pixels);
 void clock_label(volatile uint16_t *pixels, int x, int y, const char *text, uint16_t fg, uint16_t bg);
 void clock_big(const Clock *clock, uint32_t raw, volatile uint16_t *pixels);

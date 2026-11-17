@@ -2,7 +2,7 @@
 #include "resident_check.h"
 #include "resident_build.h"
 #include "ui.h"
-#include "text.h"
+#include "common/draw.h"
 #include "input.h"
 
 #include <libndls.h>
@@ -20,9 +20,7 @@ static Gc graphics;
 static void clear(void) {
     ui_present(&ui);
     gui_gc_begin(graphics);
-    gui_gc_setFont(graphics, Regular10);
-    gui_gc_setColorRGB(graphics, 255, 255, 255);
-    gui_gc_fillRect(graphics, 0, 0, 320, 240);
+    ui_draw_header(graphics, &ui_themes[0], "nUSB - automatic diagnostics");
 }
 
 static void present(void) {
@@ -32,10 +30,7 @@ static void present(void) {
 }
 
 static void text(int y, const char *line) {
-    uint16_t encoded[64];
-    text_utf16(line, encoded, sizeof(encoded) / sizeof(encoded[0]));
-    gui_gc_setColorRGB(graphics, 0, 0, 0);
-    gui_gc_drawString(graphics, (char *)encoded, 4, y - 4, GC_SM_TOP);
+    ui_draw_text(graphics, line, 8, y, Regular10, ui_themes[0].fg);
 }
 
 bool diagnose_cancelled(void) {
@@ -48,21 +43,19 @@ void diagnose_progress(unsigned current, unsigned total, const char *label) {
     char line[64];
     if (!screen_ready) return;
     clear();
-    text(4, "nUSB - automatic diagnostics");
     if (total) snprintf(line, sizeof(line), "Step %u / %u", current, total);
     else snprintf(line, sizeof(line), "Completed checks: %u", current);
-    text(28, line);
-    text(46, label);
+    text(34, line);
+    text(54, label);
     text(88, "Keep the drive connected.");
     text(106, "Results are saved to internal storage.");
     text(124, "Failed cases do not require a key press.");
-    text(210, "Esc: stop safely and save the report");
+    ui_draw_footer(graphics, &ui_themes[0], "Esc: stop safely and save the report");
     present();
 }
 
 static bool confirm(void) {
     clear();
-    text(4, "nUSB - automatic diagnostics");
     text(30, "Back up the drive before this test.");
     text(48, "Tests create their own temporary files.");
     text(66, "A device fault can affect filesystem metadata.");
@@ -70,7 +63,7 @@ static bool confirm(void) {
     text(116, "Connect the drive and keep it connected.");
     text(148, "All software cases run automatically.");
     text(166, "One report is saved inside the calculator.");
-    text(210, "Enter/Return/Click: run   Esc: cancel");
+    ui_draw_footer(graphics, &ui_themes[0], "Enter/Return/Click: run   Esc: cancel");
     present();
     wait_no_key_pressed();
     input_reset();

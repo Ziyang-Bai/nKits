@@ -8,13 +8,13 @@ TI-Nspire CX/CX II + Ndless 的轻量级、byte-oriented 十六进制编辑器�
 Ndless keys -> input -> app -> editor -> file_buffer -> source file
                                   |
                                   +-> fixed page cache -> journal
-file_buffer -> editor state -> ui (NspireIO/lcd_blit) -> 320x240 display
+file_buffer -> editor state -> ui (common/draw + ngc) -> 320x240 display
 ```
 
 - `src/file_buffer.c`：4 KiB、6 槽 LRU 页面缓存；脏页逐出到旁路 journal，不写原文件；流式安全保存。
 - `src/editor.c`：唯一的 byte 编辑模型、光标、nibble 状态、导航和 Go To 解析。Hex 和 ASCII 都调用 `editor_write_byte()`。
 - `src/input.c`：Ndless `isKeyPressed()` 映射，不接触文件 I/O。
-- `src/ui.c`：使用 NspireIO 的离屏缓冲和 Ndless `lcd_blit()` 直接绘制 320x240 界面，不依赖 OS GC 内部布局，也不修改数据。
+- `src/ui.c`：使用独立 OS GC 与共享 `common/draw` 绘制界面，不修改文件数据；路径等输入仍使用系统原生对话框。
 - `src/app.c`：文件生命周期、对话框、未保存确认和事件循环。
 - `src/main.c`：启动入口；优先打开 `argv[1]`，否则显示路径输入框。
 
@@ -46,7 +46,9 @@ Open 页面和 `Ctrl+N` 可以创建新文件；创建时可用十进制或 `0x`
 
 ## TI-Nspire 操作
 
-屏幕每行显示 8 bytes，以适应 320px 宽度；同一光标会在活动区高亮、在另一栏显示对应高亮。Hex 模式状态栏显示 `HIGH`/`LOW`。
+屏幕每行显示 8 bytes，以适应 320px 宽度；Hex、ASCII 和 nibble 光标按实测 SerifRegular7 字宽逐格绘制，为两栏保留清晰间隔。可见行数和翻页距离按字形高度计算。同一光标在活动区高亮、另一栏显示对应位置；Hex 模式状态栏显示 `HIGH`/`LOW`。
+
+编辑页、Open 菜单、文件浏览器、保存确认和 Help/About 使用 nTexts 风格的白底、系统字体、浅蓝整行选择和底部按键提示。文件浏览器滚动选择；Help 分两页，左右键或 Tab 切换到下一页及 About。
 
 | 按键 | 操作 |
 |---|---|

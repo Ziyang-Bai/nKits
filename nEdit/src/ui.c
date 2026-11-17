@@ -2,7 +2,7 @@
 #include "version.h"
 
 #include <libndls.h>
-#include <nspireio/nspireio.h>
+#include "common/draw.h"
 #include <dirent.h>
 
 #include <stdint.h>
@@ -11,102 +11,82 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define TEXT_X 36
-#define BODY_Y 32
-#define BODY_ROW_HEIGHT 10
+#define BODY_Y 50
 #define BROWSER_MAX_ITEMS 128
 #define BROWSER_NAME_MAX 128
-#define BROWSER_VISIBLE_ROWS 20
+#define BROWSER_VISIBLE_ROWS 8
 
-static void draw_text(int x, int y, const char *text, int background, int foreground) {
-    nio_vram_pixel_puts(x, y, text, background, foreground);
+static Gc graphics;
+static unsigned interrupt_state;
+static int cell_width, digit_width, row_height, text_x;
+static const UiTheme *theme = &ui_themes[0];
+
+static unsigned interrupt_mask(void) {
+    unsigned mask;
+    __asm__ volatile("mrs %0, cpsr" : "=r"(mask));
+    return mask & 0xc0u;
+}
+
+static void restore_interrupts(unsigned mask) {
+    unsigned value;
+    __asm__ volatile("mrs %0, cpsr" : "=r"(value));
+    value = (value & ~0xc0u) | mask;
+    __asm__ volatile("msr cpsr_c, %0" :: "r"(value) : "memory", "cc");
+}
+
+static void begin_screen(const char *title) {
+    interrupt_state = interrupt_mask();
+    gui_gc_begin(graphics);
+    gui_gc_clipRect(graphics, 0, 0, UI_WIDTH, UI_HEIGHT, GC_CRO_SET);
+    ui_draw_header(graphics, theme, title);
+}
+
+static void finish_screen(const char *hint) {
+    if (hint) ui_draw_footer(graphics, theme, hint);
+    gui_gc_finish(graphics);
+    gui_gc_blit_to_screen(graphics);
+    restore_interrupts(interrupt_state);
 }
 
 typedef struct {
     uint32_t value;
     const char *name;
-    uint8_t rows[7];
 } Symbol;
 
 static const Symbol symbols[] = {
-    {0x03b1, "alpha",   {0,0,13,18,18,18,13}},
-    {0x03b2, "beta",    {12,18,18,28,18,18,28}},
-    {0x03b3, "gamma",   {0,0,17,17,10,4,4}},
-    {0x03b4, "delta",   {6,8,4,14,17,17,14}},
-    {0x03b5, "epsilon", {0,0,14,16,12,16,14}},
-    {0x03b6, "zeta",    {31,2,4,8,16,14,2}},
-    {0x03b7, "eta",     {0,0,22,25,17,1,1}},
-    {0x03b8, "theta",   {14,17,17,31,17,17,14}},
-    {0x03b9, "iota",    {0,4,0,4,4,4,6}},
-    {0x03ba, "kappa",   {0,0,18,20,24,20,18}},
-    {0x03bb, "lambda",  {16,8,8,12,10,18,17}},
-    {0x03bc, "mu",      {0,0,18,18,18,29,16}},
-    {0x03bd, "nu",      {0,0,17,17,18,20,8}},
-    {0x03be, "xi",      {14,16,14,8,14,1,14}},
-    {0x03bf, "omicron", {0,0,14,17,17,17,14}},
-    {0x03c0, "pi",      {0,0,31,10,10,10,11}},
-    {0x03c1, "rho",     {0,14,17,17,30,16,16}},
-    {0x03c3, "sigma",   {0,0,15,18,17,17,14}},
-    {0x03c4, "tau",     {0,0,31,4,4,4,3}},
-    {0x03c5, "upsilon", {0,0,17,17,17,17,14}},
-    {0x03c6, "phi",     {4,4,14,21,21,14,4}},
-    {0x03c7, "chi",     {0,17,10,4,10,17,0}},
-    {0x03c8, "psi",     {4,21,21,21,14,4,4}},
-    {0x03c9, "omega",   {0,0,17,17,21,21,10}},
-    {0x0393, "Gamma",   {31,16,16,16,16,16,16}},
-    {0x0394, "Delta",   {4,4,10,10,17,17,31}},
-    {0x0398, "Theta",   {14,17,17,21,17,17,14}},
-    {0x039b, "Lambda",  {4,4,10,10,17,17,17}},
-    {0x039e, "Xi",      {31,0,0,14,0,0,31}},
-    {0x03a0, "Pi",      {31,17,17,17,17,17,17}},
-    {0x03a3, "Sigma",   {31,16,8,4,8,16,31}},
-    {0x03a6, "Phi",     {4,14,21,21,21,14,4}},
-    {0x03a8, "Psi",     {21,21,21,14,4,4,4}},
-    {0x03a9, "Omega",   {14,17,17,17,10,10,27}},
-    {0x00b0, "degree",  {6,9,9,6,0,0,0}},
-    {0x00b1, "plus/minus", {0,4,4,31,4,0,31}},
-    {0x00b2, "squared", {12,2,4,8,14,0,0}},
-    {0x00b3, "cubed",   {12,2,4,2,12,0,0}},
-    {0x00d7, "multiply",{0,17,10,4,10,17,0}},
-    {0x00f7, "divide",  {0,4,0,31,0,4,0}},
-    {0x221a, "square root", {0,7,4,4,20,12,4}},
-    {0x221e, "infinity",{0,0,10,21,21,10,0}},
-    {0x2264, "less/equal", {2,4,8,16,8,4,31}},
-    {0x2265, "greater/equal", {8,4,2,1,2,4,31}},
-    {0x2260, "not equal", {0,2,31,4,31,8,0}},
-    {0x2248, "approximate", {0,9,22,0,9,22,0}},
-    {0x222b, "integral",{6,8,8,8,8,8,16}},
-    {0x2202, "partial", {12,2,1,15,17,17,14}},
-    {0x2207, "nabla",   {31,17,17,10,10,4,4}},
-    {0x2211, "sum",     {31,16,8,4,8,16,31}},
-    {0x220f, "product", {31,10,10,10,10,10,10}},
-    {0x2190, "left arrow", {0,4,8,31,8,4,0}},
-    {0x2192, "right arrow", {0,4,2,31,2,4,0}},
-    {0x21d2, "implies", {0,4,2,31,2,31,4}},
-    {0x00b7, "middle dot", {0,0,0,4,0,0,0}}
+    {0x03b1, "alpha"}, {0x03b2, "beta"}, {0x03b3, "gamma"},
+    {0x03b4, "delta"}, {0x03b5, "epsilon"}, {0x03b6, "zeta"},
+    {0x03b7, "eta"}, {0x03b8, "theta"}, {0x03b9, "iota"},
+    {0x03ba, "kappa"}, {0x03bb, "lambda"}, {0x03bc, "mu"},
+    {0x03bd, "nu"}, {0x03be, "xi"}, {0x03bf, "omicron"},
+    {0x03c0, "pi"}, {0x03c1, "rho"}, {0x03c3, "sigma"},
+    {0x03c4, "tau"}, {0x03c5, "upsilon"}, {0x03c6, "phi"},
+    {0x03c7, "chi"}, {0x03c8, "psi"}, {0x03c9, "omega"},
+    {0x0393, "Gamma"}, {0x0394, "Delta"}, {0x0398, "Theta"},
+    {0x039b, "Lambda"}, {0x039e, "Xi"}, {0x03a0, "Pi"},
+    {0x03a3, "Sigma"}, {0x03a6, "Phi"}, {0x03a8, "Psi"},
+    {0x03a9, "Omega"}, {0x00b0, "degree"}, {0x00b1, "plus/minus"},
+    {0x00b2, "squared"}, {0x00b3, "cubed"}, {0x00d7, "multiply"},
+    {0x00f7, "divide"}, {0x221a, "square root"}, {0x221e, "infinity"},
+    {0x2264, "less/equal"}, {0x2265, "greater/equal"}, {0x2260, "not equal"},
+    {0x2248, "approximate"}, {0x222b, "integral"}, {0x2202, "partial"},
+    {0x2207, "nabla"}, {0x2211, "sum"}, {0x220f, "product"},
+    {0x2190, "left arrow"}, {0x2192, "right arrow"}, {0x21d2, "implies"},
+    {0x00b7, "middle dot"}
 };
 
 static void draw_character(int x, int y, uint32_t value, int bg, int fg) {
-    size_t index;
-    char text[2] = {'?', '\0'};
-    if (value >= 0x20 && value <= 0x7e) {
-        text[0] = (char)value;
-    } else if (value == '\t') {
-        text[0] = ' ';
-    } else {
-        for (index = 0; index < sizeof(symbols) / sizeof(symbols[0]); ++index) {
-            if (symbols[index].value == value) {
-                unsigned row, column;
-                nio_vram_fill(x, y, 6, 8, bg);
-                for (row = 0; row < 7; ++row)
-                    for (column = 0; column < 5; ++column)
-                        if (symbols[index].rows[row] & (16u >> column))
-                            nio_vram_fill(x + column, y + row, 1, 1, fg);
-                return;
-            }
-        }
-    }
-    draw_text(x, y, text, bg, fg);
+    uint16_t text[3] = {0, 0, 0};
+    if (value == '\t') value = ' ';
+    if (value > 0xffff) {
+        value -= 0x10000;
+        text[0] = 0xd800 | (value >> 10);
+        text[1] = 0xdc00 | (value & 0x3ff);
+    } else text[0] = value;
+    ui_fill(graphics, x, y, cell_width, row_height, bg);
+    gui_gc_clipRect(graphics, x, y, cell_width, row_height, GC_CRO_SET);
+    ui_draw_u16(graphics, text, x, y, Regular9, fg);
+    gui_gc_clipRect(graphics, 0, 0, UI_WIDTH, UI_HEIGHT, GC_CRO_SET);
 }
 
 static const char *base_name(const char *path) {
@@ -115,16 +95,43 @@ static const char *base_name(const char *path) {
 }
 
 bool ui_init(Ui *ui) {
-    if (!ui || !nio_scrbuf_init()) return false;
+    unsigned mask;
+    unsigned value;
+    size_t index;
+    Gc source;
+    if (!ui) return false;
+    mask = interrupt_mask();
+    source = gui_gc_global_GC();
+    graphics = source ? gui_gc_copy(source, UI_WIDTH, UI_HEIGHT) : NULL;
+    if (!graphics) { restore_interrupts(mask); return false; }
+    gui_gc_setRegion(graphics, 0, 0, UI_WIDTH, UI_HEIGHT, 0, 0, UI_WIDTH, UI_HEIGHT);
+    gui_gc_begin(graphics);
+    cell_width = digit_width = 1;
+    row_height = ui_line_height(graphics, Regular9);
+    for (value = 32; value <= 126; ++value) {
+        uint16_t text[2] = {value, 0};
+        int width = gui_gc_getStringWidth(graphics, Regular9, (char *)text, 0, 1);
+        if (width > cell_width) cell_width = width;
+        if (value >= '0' && value <= '9' && width > digit_width) digit_width = width;
+    }
+    for (index = 0; index < sizeof(symbols) / sizeof(symbols[0]); ++index) {
+        uint16_t text[2] = {symbols[index].value, 0};
+        int width = gui_gc_getStringWidth(graphics, Regular9, (char *)text, 0, 1);
+        if (width > cell_width) cell_width = width;
+    }
+    text_x = 5 * digit_width + 8;
+    gui_gc_finish(graphics);
+    restore_interrupts(mask);
     ui->initialized = true;
-    nio_scrbuf_clear();
-    nio_vram_draw();
     return true;
 }
 
 void ui_destroy(Ui *ui) {
     if (ui && ui->initialized) {
-        nio_scrbuf_free();
+        unsigned mask = interrupt_mask();
+        gui_gc_free(graphics);
+        graphics = NULL;
+        restore_interrupts(mask);
         ui->initialized = false;
     }
 }
@@ -146,17 +153,17 @@ static void draw_editor_row(Editor *editor, size_t line_offset, size_t line_numb
     char number[8];
 
     snprintf(number, sizeof(number), "%5lu", (unsigned long)line_number);
-    draw_text(2, y, number, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+    ui_draw_text(graphics, number, 4, y, Regular9, theme->muted);
     for (column = 0; column < editor->left_column && offset < line_end; ++column)
         offset += editor_character_at(editor, offset, &value);
-    for (column = 0; column < NEDIT_VISIBLE_COLUMNS; ++column) {
+    for (column = 0; column < editor->visible_columns; ++column) {
         size_t logical_column = editor->left_column + column;
         bool cursor = cursor_line == line_offset && cursor_column == logical_column;
-        int background = cursor ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-        int foreground = cursor ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
+        int background = cursor ? theme->highlight_bg : theme->bg;
+        int foreground = cursor ? theme->highlight_fg : theme->fg;
         value = ' ';
         if (offset < line_end) offset += editor_character_at(editor, offset, &value);
-        draw_character(TEXT_X + (int)column * 6, y, value, background, foreground);
+        draw_character(text_x + (int)column * cell_width, y, value, background, foreground);
     }
 }
 
@@ -173,35 +180,30 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
 
     if (!ui || !ui->initialized || !editor) return;
     buffer = editor->buffer;
+    editor->visible_rows = (212 - BODY_Y) / row_height;
+    editor->visible_columns = (UI_WIDTH - text_x - 4) / cell_width;
+    editor_ensure_visible(editor);
     size = text_buffer_size(buffer);
     cursor_line = editor_line_start(editor, editor->cursor_offset);
     cursor_column = editor_column(editor);
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-
-    snprintf(text, sizeof(text), "nEdit - %.30s", base_name(text_buffer_path(buffer)));
-    draw_text(2, 1, text, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    if (sticky_keys)
-        draw_text(226, 1, "STKY", NIO_COLOR_WHITE, NIO_COLOR_BLUE);
-    if (caps_lock)
-        draw_text(258, 1, "CAPS", NIO_COLOR_WHITE, NIO_COLOR_BLUE);
-    if (text_buffer_modified(buffer))
-        draw_text(290, 1, "MOD", NIO_COLOR_WHITE, NIO_COLOR_LIGHTRED);
-
-    snprintf(text, sizeof(text), "Ln:%lu Col:%lu Off:%lu Size:%lu INS",
+    snprintf(text, sizeof(text), "nEdit - %.28s%s", base_name(text_buffer_path(buffer)),
+             text_buffer_modified(buffer) ? " *" : "");
+    begin_screen(text);
+    snprintf(text, sizeof(text), "Ln:%lu Col:%lu  INS%s%s",
              (unsigned long)editor_line_number(editor),
              (unsigned long)(cursor_column + 1),
-             (unsigned long)editor->cursor_offset,
-             (unsigned long)size);
-    draw_text(2, 13, text, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_fill(0, 27, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    nio_vram_fill(34, 28, 1, 181, NIO_COLOR_GRAY);
+             caps_lock ? " CAPS" : "", sticky_keys ? " STKY" : "");
+    ui_draw_text(graphics, text, 8, 24, Regular9, theme->muted);
+    snprintf(text, sizeof(text), "Off:%lu  Size:%lu",
+             (unsigned long)editor->cursor_offset, (unsigned long)size);
+    ui_draw_text(graphics, text, 8, 37, Regular9, theme->muted);
 
     line_offset = editor->top_offset;
     line_number = line_number_at(editor, line_offset);
-    for (row = 0; row < NEDIT_VISIBLE_ROWS && !done; ++row) {
+    for (row = 0; row < editor->visible_rows && !done; ++row) {
         size_t next;
         draw_editor_row(editor, line_offset, line_number, cursor_line, cursor_column,
-                        BODY_Y + (int)row * BODY_ROW_HEIGHT);
+                        BODY_Y + (int)row * row_height);
         next = editor_next_line(editor, line_offset);
         if (next == line_offset) {
             done = true;
@@ -211,19 +213,20 @@ void ui_draw(Ui *ui, Editor *editor, const char *message,
         }
     }
 
-    nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    if (message && message[0]) {
-        snprintf(text, sizeof(text), "%.52s", message);
-        draw_text(2, 220, text, NIO_COLOR_WHITE, NIO_COLOR_BLUE);
-    } else {
-        draw_text(2, 220, "Ctrl+S save/back Menu actions Esc home",
-                  NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    }
-    nio_vram_draw();
+    finish_screen(message && message[0] ? message : "Ctrl+S save/back  Menu actions  Esc home");
 }
 
 void ui_message(const char *title, const char *message) {
-    show_msgbox(title, message);
+    begin_screen(title);
+    ui_draw_wrapped(graphics, message, 10, 40, 300, Regular10, theme->fg);
+    finish_screen("Enter/Esc back");
+    wait_no_key_pressed();
+    for (;;) {
+        if (isKeyPressed(KEY_NSPIRE_RET) || isKeyPressed(KEY_NSPIRE_ENTER) ||
+            isKeyPressed(KEY_NSPIRE_CLICK) || isKeyPressed(KEY_NSPIRE_ESC)) break;
+        msleep(10);
+    }
+    wait_no_key_pressed();
 }
 
 char *ui_prompt(const char *title, const char *label, const char *initial) {
@@ -232,29 +235,18 @@ char *ui_prompt(const char *title, const char *label, const char *initial) {
         free(value);
         return NULL;
     }
+    wait_no_key_pressed();
     return value;
 }
 
 static void draw_save_confirmation(unsigned selected) {
     static const char *options[] = {"1  Save", "2  Discard changes", "3  Cancel"};
     unsigned index;
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-    draw_text(2, 4, "nEdit", NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    draw_text(2, 18, "Save changes?", NIO_COLOR_WHITE, NIO_COLOR_LIGHTRED);
-    draw_text(2, 31, "This file has unsaved modifications.",
-              NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_fill(0, 44, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index) {
-        int y = 72 + (int)index * 39;
-        int background = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-        int foreground = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-        nio_vram_fill(20, (unsigned)(y - 8), 280, 28, (unsigned)background);
-        draw_text(30, y, options[index], background, foreground);
-    }
-    nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(2, 220, "Up/Down choose Enter select Esc cancel",
-              NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_draw();
+    begin_screen("nEdit - Save changes?");
+    ui_draw_text(graphics, "This file has unsaved modifications.", 10, 36, Regular9, theme->muted);
+    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index)
+        ui_draw_row(graphics, theme, 72 + (int)index * 32, options[index], index == selected);
+    finish_screen("Up/Down choose  Enter select  Esc cancel");
 }
 
 static int wait_save_key(void) {
@@ -387,24 +379,16 @@ static char *browse_for_file(Ui *ui, const char *initial) {
         if (selected >= count) selected = count ? count - 1 : 0;
         if (top > selected) top = selected;
         if (selected >= top + BROWSER_VISIBLE_ROWS) top = selected - BROWSER_VISIBLE_ROWS + 1;
-        nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-        snprintf(text, sizeof(text), "Open: %.44s", base_name(directory));
-        draw_text(2, 2, text, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-        snprintf(text, sizeof(text), "%.52s", directory);
-        draw_text(2, 13, text, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        nio_vram_fill(0, 23, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
+        snprintf(text, sizeof(text), "Open: %.30s", base_name(directory));
+        begin_screen(text);
+        ui_draw_text(graphics, directory, 8, 26, Regular9, theme->muted);
         for (row = 0; row < BROWSER_VISIBLE_ROWS && top + row < count; ++row) {
             size_t index = top + row;
-            int y = 27 + (int)row * 9;
-            int bg = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-            int fg = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-            snprintf(text, sizeof(text), "%s%.47s", items[index].is_directory ? "[D] " : "    ", items[index].name);
-            draw_text(2, y, text, bg, fg);
+            snprintf(text, sizeof(text), "%s%s", items[index].is_directory ? "[D] " : "    ", items[index].name);
+            ui_draw_row(graphics, theme, 48 + (int)row * 20, text, index == selected);
         }
-        if (!count) draw_text(2, 31, "(empty directory)", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-        draw_text(2, 220, "Enter open/enter dir Esc up/back", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        nio_vram_draw();
+        if (!count) ui_draw_text(graphics, "(empty directory)", 10, 48, Regular10, theme->muted);
+        finish_screen("Enter open/enter dir  Esc up/back");
         key = wait_browser_key();
         wait_no_key_pressed();
         if (key == 1 && count) selected = selected ? selected - 1 : count - 1;
@@ -441,7 +425,7 @@ static int wait_information_key(void) {
     }
 }
 
-static void draw_information_page(bool about) {
+static void draw_information_page(unsigned page) {
     static const char *help[] = {
         "Arrows        Move cursor", "Shift+Up/Dn   Page up/down",
         "Ctrl+Left/Rt  Row start/end", "Ctrl+Up/Down  Document start/end",
@@ -464,31 +448,29 @@ static void draw_information_page(bool about) {
         "Commit " NKITS_COMMIT, "", "Copyright (c) 2026 Ziyang-Bai.",
         "GNU GPL v3 licensed.", "No warranty; see LICENSE."
     };
+    bool about = page == 2;
     const char *const *lines = about ? about_lines : help;
     size_t count = about ? sizeof(about_lines) / sizeof(about_lines[0]) : sizeof(help) / sizeof(help[0]);
-    size_t index;
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-    draw_text(2, 3, about ? "About nEdit" : "nEdit Help", NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    draw_text(284, 3, about ? "2/2" : "1/2", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_fill(0, 17, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    for (index = 0; index < count; ++index) {
-        draw_text(6, 24 + (int)index * 9, lines[index], NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    }
-    nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(2, 220, "Left/Right switch Enter/Esc back", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_draw();
+    size_t index, start = about ? 0 : page * 10;
+    char title[48];
+    snprintf(title, sizeof(title), "%s  %u/3", about ? "About nEdit" : "nEdit Help", page + 1);
+    begin_screen(title);
+    for (index = start; index < count && index < start + (about ? 12 : 10); ++index)
+        ui_draw_text(graphics, lines[index], 10, 32 + (int)(index - start) * 14, Regular9, theme->fg);
+    finish_screen("Left/Right pages  Enter/Esc back");
 }
 
 static void show_information(Ui *ui, bool about) {
+    unsigned page = about ? 2 : 0;
     if (!ui || !ui->initialized) return;
     wait_no_key_pressed();
     for (;;) {
         int direction;
-        draw_information_page(about);
+        draw_information_page(page);
         direction = wait_information_key();
         wait_no_key_pressed();
         if (!direction) return;
-        about = !about;
+        page = (page + (direction < 0 ? 2 : 1)) % 3;
     }
 }
 
@@ -498,21 +480,12 @@ static void draw_open_menu(unsigned selected, bool home) {
         "4  Help", "5  About nEdit", "6  Cancel"
     };
     unsigned index;
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-    draw_text(2, 4, "nEdit - Open", NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    draw_text(2, 17, "Choose an action", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_fill(0, 30, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index) {
-        int y = 43 + (int)index * 28;
-        int bg = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-        int fg = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-        nio_vram_fill(20, (unsigned)(y - 6), 280, 24, (unsigned)bg);
-        draw_text(30, y, home && index == 5 ? "6  Exit nEdit" : options[index], bg, fg);
-    }
-    nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(2, 220, home ? "Up/Down choose Enter select Esc exit" :
-              "Up/Down choose Enter select Esc cancel", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_draw();
+    begin_screen("nEdit - Open");
+    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index)
+        ui_draw_row(graphics, theme, 40 + (int)index * 26,
+                    home && index == 5 ? "6  Exit nEdit" : options[index], index == selected);
+    finish_screen(home ? "Up/Down choose  Enter select  Esc exit" :
+                  "Up/Down choose  Enter select  Esc cancel");
 }
 
 static int wait_open_key(void) {
@@ -583,23 +556,18 @@ InputAction ui_show_menu(Ui *ui) {
         {"About", INPUT_NONE},
         {"Return home               Esc", INPUT_EXIT}
     };
-    unsigned selected = 0;
+    unsigned selected = 0, top = 0;
     unsigned count = sizeof(items) / sizeof(items[0]);
     if (!ui || !ui->initialized) return INPUT_NONE;
     for (;;) {
         unsigned index;
         int key;
-        nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-        draw_text(2, 4, "nEdit - Edit menu", NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-        for (index = 0; index < count; ++index) {
-            int bg = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-            int fg = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-            nio_vram_fill(4, 26 + index * 14, 312, 13, bg);
-            draw_text(8, 28 + index * 14, items[index].label, bg, fg);
-        }
-        draw_text(2, 220, "Up/Down choose Enter select Esc back",
-                  NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        nio_vram_draw();
+        if (selected < top) top = selected;
+        if (selected >= top + 8) top = selected - 7;
+        begin_screen("nEdit - Edit menu");
+        for (index = top; index < count && index < top + 8; ++index)
+            ui_draw_row(graphics, theme, 40 + (int)(index - top) * 20, items[index].label, index == selected);
+        finish_screen("Up/Down choose  Enter select  Esc back");
         key = wait_browser_key();
         wait_no_key_pressed();
         if (key == 1) selected = selected ? selected - 1 : count - 1;
@@ -638,25 +606,22 @@ uint32_t ui_choose_symbol(Ui *ui) {
         char label[80];
         uint32_t value = selected < punctuation_count ? (uint8_t)punctuation[selected] :
                          symbols[selected - punctuation_count].value;
-        nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
         snprintf(label, sizeof(label), "Symbols  %u/%u", selected / 24 + 1, (count + 23) / 24);
-        draw_text(2, 4, label, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
+        begin_screen(label);
         for (index = start; index < start + 24 && index < count; ++index) {
             int x = 10 + (index - start) % 6 * 51;
             int y = 34 + (index - start) / 6 * 36;
-            int bg = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-            int fg = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
+            int bg = index == selected ? theme->highlight_bg : theme->bg;
+            int fg = index == selected ? theme->highlight_fg : theme->fg;
             uint32_t code = index < punctuation_count ? (uint8_t)punctuation[index] :
                             symbols[index - punctuation_count].value;
-            nio_vram_fill(x, y, 44, 28, bg);
-            draw_character(x + 19, y + 10, code, bg, fg);
+            ui_fill(graphics, x, y, 44, 28, bg);
+            draw_character(x + (44 - cell_width) / 2, y + 7, code, bg, fg);
         }
         snprintf(label, sizeof(label), "U+%04lX  %s", (unsigned long)value,
                  selected < punctuation_count ? "Punctuation" : symbols[selected - punctuation_count].name);
-        draw_text(8, 188, label, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-        draw_text(2, 212, "Arrows choose Tab page Enter insert", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        draw_text(2, 225, "Esc cancel", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        nio_vram_draw();
+        ui_draw_text(graphics, label, 8, 188, Regular9, theme->fg);
+        finish_screen("Arrows choose  Tab page  Enter insert  Esc cancel");
         key = wait_symbol_key();
         wait_no_key_pressed();
         switch (key) {

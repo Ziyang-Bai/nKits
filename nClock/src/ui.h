@@ -9,6 +9,7 @@ bool clock_ui_open(ClockService service);
 void clock_ui_close(void);
 int clock_ui_menu(Clock *clock, const char *title, const char *const *items, unsigned count, bool big);
 void clock_ui_position(Clock *clock);
+void clock_ui_date(const Clock *clock, uint32_t raw, char text[80]);
 bool clock_power_open(void);
 void clock_power_off(void);
 void clock_power_on(void);

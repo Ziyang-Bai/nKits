@@ -15,6 +15,7 @@ void editor_init(Editor *editor, FileBuffer *buffer) {
     editor->top_offset = 0;
     editor->mode = EDIT_MODE_HEX;
     editor->high_nibble = true;
+    editor->visible_rows = NHEX_VISIBLE_ROWS;
 }
 
 void editor_toggle_mode(Editor *editor) {
@@ -23,7 +24,7 @@ void editor_toggle_mode(Editor *editor) {
 }
 
 void editor_ensure_visible(Editor *editor) {
-    const uint64_t visible = (uint64_t)NHEX_BYTES_PER_ROW * NHEX_VISIBLE_ROWS;
+    const uint64_t visible = (uint64_t)NHEX_BYTES_PER_ROW * editor->visible_rows;
     uint64_t cursor_row;
     uint64_t top_row;
 
@@ -35,7 +36,7 @@ void editor_ensure_visible(Editor *editor) {
         return;
     }
     cursor_row = editor->cursor_offset / NHEX_BYTES_PER_ROW;
-    top_row = cursor_row >= NHEX_VISIBLE_ROWS - 1 ? cursor_row - (NHEX_VISIBLE_ROWS - 1) : 0;
+    top_row = cursor_row >= editor->visible_rows - 1 ? cursor_row - (editor->visible_rows - 1) : 0;
     editor->top_offset = top_row * NHEX_BYTES_PER_ROW;
 }
 
@@ -49,7 +50,7 @@ bool editor_move(Editor *editor, EditorMove move) {
     }
     target = editor->cursor_offset;
     if (move == EDIT_MOVE_PAGE_UP || move == EDIT_MOVE_PAGE_DOWN) {
-        amount *= NHEX_VISIBLE_ROWS;
+        amount *= editor->visible_rows;
     }
 
     switch (move) {

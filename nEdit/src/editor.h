@@ -30,6 +30,8 @@ typedef struct {
     size_t top_offset;
     size_t left_column;
     size_t preferred_column;
+    unsigned visible_rows;
+    unsigned visible_columns;
 } Editor;
 
 void editor_init(Editor *editor, TextBuffer *buffer);

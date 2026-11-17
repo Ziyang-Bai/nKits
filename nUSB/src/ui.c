@@ -2,6 +2,7 @@
 #include "language.h"
 #include "text.h"
 #include "version.h"
+#include "common/draw.h"
 
 #include <ngc.h>
 #include <stdio.h>
@@ -12,10 +13,7 @@
 #define VIC_DISABLE (*(volatile uint32_t *)0xdc000014)
 #define KEYPAD_IRQ (1u << 16)
 #define LCD_IRQ (1u << 21)
-#define UI_WHITE 0xffffff
-#define UI_BLACK 0x000000
-#define UI_BLUE 0x1859ac
-#define UI_BORDER 0x808080
+#define UI_BLACK (ui_themes[0].fg)
 #define UI_FONT Regular10
 #define PAGE_ROWS 9
 #define LINE_UNITS 320
@@ -55,13 +53,8 @@ void ui_present(Ui *ui) {
         LCD_CURSOR_CONTROL &= ~1u;
 }
 
-static void color(int rgb) {
-    gui_gc_setColorRGB(graphics, (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
-}
-
 static void fill(int x, int y, int width, int height, int rgb) {
-    color(rgb);
-    gui_gc_fillRect(graphics, x, y, width, height);
+    ui_fill(graphics, x, y, width, height, rgb);
 }
 
 static unsigned scalar_width(uint32_t scalar) {
@@ -109,9 +102,8 @@ static const char *text_line(const char *text, uint16_t *line, size_t capacity,
 }
 
 static void draw_line(int x, int y, const uint16_t *line, int foreground) {
-    color(foreground);
     /* OS 6.4 CJK glyphs have a four-pixel top inset and 15-pixel ink height. */
-    gui_gc_drawString(graphics, (char *)line, x, y - 4, GC_SM_TOP);
+    ui_draw_u16(graphics, line, x, y - 4, UI_FONT, foreground);
 }
 
 static unsigned draw_clipped(int x, int y, const char *text, unsigned pixels, int foreground) {
@@ -177,11 +169,8 @@ void ui_destroy(Ui *ui) {
 
 static void frame(const char *title) {
     gui_gc_begin(graphics);
+    ui_draw_header(graphics, &ui_themes[0], title);
     gui_gc_setFont(graphics, UI_FONT);
-    fill(0, 0, 320, 240, UI_WHITE);
-    draw_text(2, 2, title, UI_BLACK);
-    fill(0, 36, 320, 1, UI_BORDER);
-    fill(0, 202, 320, 1, UI_BORDER);
 }
 
 static void finish(Ui *ui) {
@@ -199,14 +188,14 @@ static void page_text(TextPage *page, const char *text) {
     do {
         const char *end;
         if (page->line >= page->scroll + PAGE_ROWS) return;
-        end = text_line(text, line, LINE_UNITS + 1, 316, true, NULL);
+        end = text_line(text, line, LINE_UNITS + 1, 304, true, NULL);
         if (end == text && *text && *text != '\n') {
             uint32_t scalar;
             end += text_next(text, &scalar);
             line[0] = '?'; line[1] = 0;
         }
         if (page->line >= page->scroll)
-            draw_line(2, 39 + (page->line - page->scroll) * 18, line, UI_BLACK);
+            draw_line(8, 34 + (page->line - page->scroll) * 18, line, UI_BLACK);
         ++page->line;
         text = *end == '\n' ? end + 1 : end;
     } while (*text);
@@ -217,7 +206,7 @@ void ui_error(Ui *ui, const char *message) {
     if (!ui || !ui->initialized) return;
     frame("nUSB");
     page_text(&page, L(message));
-    draw_text(2, 205, L("Esc: Exit"), UI_BLACK);
+    ui_draw_footer(graphics, &ui_themes[0], L("Esc: Exit"));
     finish(ui);
 }
 
@@ -265,14 +254,11 @@ static void information(const App *app) {
         page_text(&page, commit);
         for (i = 0; i < sizeof(about) / sizeof(about[0]); ++i) page_text(&page, L(about[i]));
     }
-    draw_text(2, 205, L("Up/Down: Scroll   Esc / Enter: Back"), UI_BLACK);
+    ui_draw_footer(graphics, &ui_themes[0], L("Up/Down: Scroll   Esc / Enter: Back"));
 }
 
 static void menu_row(unsigned row, unsigned selected, const char *text) {
-    int bg = row == selected ? UI_BLUE : UI_WHITE;
-    int fg = row == selected ? UI_WHITE : UI_BLACK;
-    fill(0, 39 + row * 16, 320, 16, bg);
-    draw_text(2, 39 + row * 16, text, fg);
+    ui_draw_row(graphics, &ui_themes[0], 34 + row * 20, text, row == selected);
 }
 
 static void language_view(const App *app) {
@@ -287,7 +273,7 @@ static void language_view(const App *app) {
     if (app->language_status)
         draw_text(2, 140, L(app->language_status > 0 ? "Language saved" :
                           "Language changed; setting not saved"), UI_BLACK);
-    draw_text(2, 205, L("Enter: Apply   Esc: Back"), UI_BLACK);
+    ui_draw_footer(graphics, &ui_themes[0], L("Enter: Apply   Esc: Back"));
 }
 
 static void details(const App *app) {
@@ -320,7 +306,7 @@ static void details(const App *app) {
                   L(app_result_message(app->portal_result)));
         page_text(&page, L("Tokens expire on media change or foreground access."));
     }
-    draw_text(2, 205, L("Up/Down: Scroll   Esc / Enter: Back"), UI_BLACK);
+    ui_draw_footer(graphics, &ui_themes[0], L("Up/Down: Scroll   Esc / Enter: Back"));
 }
 
 static unsigned percentage(uint64_t done, uint64_t total) {
@@ -376,17 +362,17 @@ static void job_view(const App *app) {
         page_text(&page, L("Destination:"));
         page_text(&page, status->destination.path);
     }
-    draw_text(2, 205, L(app->view == APP_RESULT ?
-        "Up/Down: Scroll   Enter: Acknowledge" : "Esc: Request cancellation"), UI_BLACK);
+    ui_draw_footer(graphics, &ui_themes[0], L(app->view == APP_RESULT ?
+        "Up/Down: Scroll   Enter: Acknowledge" : "Esc: Request cancellation"));
 }
 
 static void editor_view(const App *app) {
     char text[768];
     unsigned cursor;
     frame(L(app->edit == EDIT_FOLDER ? "nUSB - New folder" : "nUSB - Choose name"));
-    name_editor_view(&app->editor, text, sizeof(text), 309, scalar_width, &cursor);
-    draw_text(2, 60, text, UI_BLACK);
-    fill(2 + cursor, 76, 6, 1, UI_BLACK);
+    name_editor_view(&app->editor, text, sizeof(text), 303, scalar_width, &cursor);
+    draw_text(8, 60, text, UI_BLACK);
+    fill(8 + cursor, 76, 6, 1, UI_BLACK);
     if (app->editor.hex_mode) {
         snprintf(text, sizeof(text), "U+%s_", app->editor.hex);
         draw_text(2, 88, text, UI_BLACK);
@@ -397,8 +383,8 @@ static void editor_view(const App *app) {
         (unsigned long)name_editor_scalar(&app->editor),
         (unsigned)name_editor_units(&app->editor));
     draw_text(2, 181, text, UI_BLACK);
-    draw_text(2, 205, L("Catalog: U+  Enter: Accept  Esc: Cancel"), UI_BLACK);
-    draw_text(2, 223, L("Del: Forward   Ctrl+Del: Backspace"), UI_BLACK);
+    ui_draw_text(graphics, L("Del: Forward   Ctrl+Del: Backspace"), 8, 196, Regular9, ui_themes[0].muted);
+    ui_draw_footer(graphics, &ui_themes[0], L("Catalog: U+  Enter: Accept  Esc: Cancel"));
 }
 
 void ui_draw(Ui *ui, const App *app) {
@@ -417,28 +403,31 @@ void ui_draw(Ui *ui, const App *app) {
         menu_row(1, app->menu_selected, L("Choose another name"));
         menu_row(2, app->menu_selected, L("Cancel operation"));
         draw_text(2, 110, fileops_status(app->job)->destination.path, UI_BLACK);
-        draw_text(2, 205, L("Enter: Choose   Esc: Cancel operation"), UI_BLACK);
+        ui_draw_footer(graphics, &ui_themes[0], L("Enter: Choose   Esc: Cancel operation"));
     } else if (app->view == APP_DELETE_CONFIRM) {
         frame(L(app->source_directory ? "nUSB - Delete entire directory tree?" : "nUSB - Delete file?"));
         menu_row(0, app->menu_selected, L("Cancel"));
         menu_row(1, app->menu_selected, L("Delete permanently"));
         draw_text(2, 90, strrchr(app->source.path, '/') + 1, UI_BLACK);
         draw_text(2, 120, L(app->message), UI_BLACK);
-        draw_text(2, 205, L("Enter: Choose   Esc: Cancel"), UI_BLACK);
+        ui_draw_footer(graphics, &ui_themes[0], L("Enter: Choose   Esc: Cancel"));
     } else {
         bool picker = app->view == APP_PICKER || app->view == APP_PICKER_MENU;
         unsigned prefix;
         frame(picker ? L("nUSB - Destination folder") :
               app->view == APP_MENU ? L("nUSB - Menu") : "nUSB");
-        snprintf(text, sizeof(text), "%s:", browser->kind == STORAGE_USB ? "USB" : L("Internal"));
-        prefix = draw_clipped(2, 19, text, 110, UI_BLACK) + 6;
-        draw_clipped(prefix, 19, browser->path, 318 - prefix, UI_BLACK);
+        if (app->view != APP_MENU && app->view != APP_PICKER_MENU) {
+            snprintf(text, sizeof(text), "%s:", browser->kind == STORAGE_USB ? "USB" : L("Internal"));
+            prefix = draw_clipped(8, 26, text, 110, UI_BLACK) + 12;
+            draw_clipped(prefix, 26, browser->path, 312 - prefix, UI_BLACK);
+        }
         if (app->view == APP_MENU) {
             static const char *items[] = {
                 "Copy", "Move", "Rename", "Delete", "Storage", "Refresh", "Help", "About", "Language", "Exit"
             };
-            for (i = 0; i < sizeof(items) / sizeof(items[0]); ++i)
-                menu_row(i, app->menu_selected, L(items[i]));
+            unsigned first = app->menu_selected >= 9 ? app->menu_selected - 8 : 0;
+            for (i = first; i < sizeof(items) / sizeof(items[0]) && i < first + 9; ++i)
+                menu_row(i - first, app->menu_selected - first, L(items[i]));
         } else if (app->view == APP_PICKER_MENU) {
             menu_row(0, app->menu_selected, L("New folder"));
             menu_row(1, app->menu_selected, L("Cancel destination selection"));
@@ -447,9 +436,8 @@ void ui_draw(Ui *ui, const App *app) {
                 const FsEntry *entry = &browser->entries[i];
                 uint16_t units[16];
                 unsigned size_width;
-                int bg = i == browser->selected ? UI_BLUE : UI_WHITE;
-                int fg = i == browser->selected ? UI_WHITE : UI_BLACK;
-                int y = 39 + i * 18;
+                int fg = i == browser->selected ? ui_themes[0].highlight_fg : UI_BLACK;
+                int y = 42 + i * 18;
                 if (entry->is_directory) strcpy(size, L("<DIR>"));
                 else {
                     uint64_t value = entry->size;
@@ -460,20 +448,21 @@ void ui_draw(Ui *ui, const App *app) {
                 }
                 size_t count = text_utf16(size, units, sizeof(units) / sizeof(units[0]));
                 size_width = gui_gc_getStringWidth(graphics, UI_FONT, (char *)units, 0, count);
-                fill(0, y, 320, 18, bg);
-                if (entry->is_directory) draw_text(2, y, "/", fg);
-                draw_clipped(13, y, entry->name, 298 - size_width, fg);
-                draw_text(318 - size_width, y, size, fg);
+                ui_draw_row(graphics, &ui_themes[0], y, "", i == browser->selected);
+                if (entry->is_directory) draw_text(8, y, "/", fg);
+                draw_clipped(19, y, entry->name, 286 - size_width, fg);
+                draw_text(312 - size_width, y, size, fg);
             }
             if (!browser->count) draw_text(2, 45, L("Empty directory"), UI_BLACK);
         } else {
             TextPage page = {0, 0};
             page_text(&page, L(app->message));
         }
-        draw_text(2, 205, L(picker ? "U: Use this folder   S: Switch storage   Menu" :
-                  "Enter: Open  Right: Details  Esc: Back  Menu"), UI_BLACK);
-        draw_text(2, 223, app->message[0] ? L(app->message) : browser->count ?
-                  browser->entries[browser->selected].name : "", UI_BLACK);
+        ui_draw_footer(graphics, &ui_themes[0], L(picker ? "U: Use this folder   S: Switch storage   Menu" :
+                  "Enter: Open  Right: Details  Esc: Back  Menu"));
+        if (app->view != APP_MENU && app->view != APP_PICKER_MENU)
+            draw_text(8, 202, app->message[0] ? L(app->message) : browser->count ?
+                      browser->entries[browser->selected].name : "", UI_BLACK);
     }
     finish(ui);
 }

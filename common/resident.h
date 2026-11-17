@@ -27,7 +27,8 @@ bool resident_key_down(const t_key *key);
 /* Logical RGB565 drawing target during OS callbacks. Buffered displays present
    this target on their next display refresh. */
 volatile uint16_t *resident_framebuffer(void);
-/* Copy the displayed LCD image into logical 320x240 RGB565 order. */
+/* Copy the OS page in logical 320x240 RGB565 order; buffered displays use
+   their drawing canvas so LCD transition frames stay out of the copy. */
 bool resident_copy_screen(uint16_t pixels[320 * 240]);
 /* Present a logical RGB565 canvas immediately from an event callback. */
 bool resident_present_screen(const uint16_t pixels[320 * 240]);

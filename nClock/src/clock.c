@@ -195,15 +195,6 @@ void clock_text(const Clock *clock, uint32_t raw, char text[CLOCK_TEXT_SIZE]) {
     *out = 0;
 }
 
-void clock_date_text(const Clock *clock, uint32_t raw, char text[40]) {
-    static const char *days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-    static const char *months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-    int64_t value = clock_time(clock, raw);
-    ClockDate date;
-    clock_to_date(value, &date);
-    snprintf(text, 40, "%s %02d %s %04d", days[(value / 86400 + 4) % 7], date.day, months[date.month - 1], date.year);
-}
-
 static const unsigned char *glyph(char ch) {
     static const unsigned char font[][5] = {
         {0x3e,0x51,0x49,0x45,0x3e},{0,0x42,0x7f,0x40,0},
@@ -304,23 +295,17 @@ static void display(volatile uint16_t *pixels, int y, uint32_t value, int scale,
 
 void clock_big(const Clock *clock, uint32_t raw, volatile uint16_t *pixels) {
     uint32_t value = (uint32_t)(clock_time(clock, raw) % 86400);
-    char text[40];
     unsigned hour = value / 3600;
     if (clock->countdown) {
         uint32_t left = clock_remaining(clock, raw);
-        snprintf(text, sizeof(text), "%s %lu days", clock->reboot ? "RESET IN:" : "COUNTDOWN:", (unsigned long)(left / 86400));
-        clock_label(pixels, 35, 38, text, 0, 0xffff);
         display(pixels, 52, left % 86400, 3, clock_blink(clock, raw), true);
     }
     if (clock->hour12) {
         hour %= 12;
         if (!hour) hour = 12;
         value = hour * 3600 + value % 3600;
-        clock_label(pixels, 284, 126, clock_time(clock, raw) % 86400 >= 43200 ? "PM" : "AM", 0, 0xffff);
     }
     display(pixels, clock->countdown ? 102 : 78, value, 5, 0, clock->seconds);
-    clock_date_text(clock, raw, text);
-    clock_label(pixels, (320 - (int)strlen(text) * 6) / 2, 170, text, 0, 0xffff);
 }
 
 static void put32(unsigned char *data, uint32_t value) {

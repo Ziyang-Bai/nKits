@@ -2,7 +2,7 @@
 #include "version.h"
 
 #include <libndls.h>
-#include <nspireio/nspireio.h>
+#include "common/draw.h"
 #include <dirent.h>
 
 #include <stdint.h>
@@ -11,16 +11,50 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define ROW_Y 43
-#define ROW_HEIGHT 13
-#define OFFSET_X 2
-#define HEX_X 56
-#define HEX_STEP 22
-#define ASCII_X 239
-#define ASCII_STEP 9
+#define GRID_FONT SerifRegular7
+#define ROW_Y 66
+static int row_height;
+static int digit_width, ascii_width;
+static int hex_x, hex_step, ascii_x;
+static Gc graphics;
+static unsigned interrupt_state;
+static const UiTheme *theme = &ui_themes[0];
 
-static void draw_text(int x, int y, const char *text, int background, int foreground) {
-    nio_vram_pixel_puts(x, y, text, background, foreground);
+static unsigned lock_interrupts(void) {
+    unsigned mask;
+    __asm__ volatile("mrs %0, cpsr" : "=r"(mask));
+    return mask & 0xc0u;
+}
+
+static void restore_interrupts(unsigned mask) {
+    unsigned value;
+    __asm__ volatile("mrs %0, cpsr" : "=r"(value));
+    value = (value & ~0xc0u) | mask;
+    __asm__ volatile("msr cpsr_c, %0" :: "r"(value) : "memory", "cc");
+}
+
+static void begin_screen(const char *title) {
+    interrupt_state = lock_interrupts();
+    gui_gc_begin(graphics);
+    gui_gc_clipRect(graphics, 0, 0, UI_WIDTH, UI_HEIGHT, GC_CRO_SET);
+    ui_draw_header(graphics, theme, title);
+}
+
+static void finish_screen(const char *hint) {
+    if (hint) ui_draw_footer(graphics, theme, hint);
+    gui_gc_finish(graphics);
+    gui_gc_blit_to_screen(graphics);
+    restore_interrupts(interrupt_state);
+}
+
+static void draw_cells(int x, int y, const char *text, int width, int bg, int fg) {
+    char cell[2] = {0, 0};
+    while (*text) {
+        cell[0] = *text++;
+        ui_fill(graphics, x, y, width, row_height, bg);
+        ui_draw_text(graphics, cell, x, y, GRID_FONT, fg);
+        x += width;
+    }
 }
 
 static const char *base_name(const char *path) {
@@ -29,18 +63,40 @@ static const char *base_name(const char *path) {
 }
 
 bool ui_init(Ui *ui) {
-    if (!ui || !nio_scrbuf_init()) {
-        return false;
+    unsigned mask;
+    unsigned value;
+    Gc source;
+    if (!ui) return false;
+    mask = lock_interrupts();
+    source = gui_gc_global_GC();
+    graphics = source ? gui_gc_copy(source, UI_WIDTH, UI_HEIGHT) : NULL;
+    if (!graphics) { restore_interrupts(mask); return false; }
+    gui_gc_setRegion(graphics, 0, 0, UI_WIDTH, UI_HEIGHT, 0, 0, UI_WIDTH, UI_HEIGHT);
+    gui_gc_begin(graphics);
+    row_height = ui_line_height(graphics, GRID_FONT);
+    digit_width = ascii_width = 1;
+    for (value = 32; value <= 126; ++value) {
+        uint16_t cell[2] = {value, 0};
+        int width = gui_gc_getStringWidth(graphics, GRID_FONT, (char *)cell, 0, 1);
+        if (width > ascii_width) ascii_width = width;
+        if (((value >= '0' && value <= '9') || (value >= 'A' && value <= 'F')) &&
+            width > digit_width) digit_width = width;
     }
+    hex_x = 8 * digit_width + 8;
+    ascii_x = UI_WIDTH - 4 - NHEX_BYTES_PER_ROW * ascii_width;
+    hex_step = (ascii_x - hex_x - 4) / NHEX_BYTES_PER_ROW;
+    gui_gc_finish(graphics);
+    restore_interrupts(mask);
     ui->initialized = true;
-    nio_scrbuf_clear();
-    nio_vram_draw();
     return true;
 }
 
 void ui_destroy(Ui *ui) {
     if (ui && ui->initialized) {
-        nio_scrbuf_free();
+        unsigned mask = lock_interrupts();
+        gui_gc_free(graphics);
+        graphics = NULL;
+        restore_interrupts(mask);
         ui->initialized = false;
     }
 }
@@ -50,8 +106,8 @@ static void draw_nibble_indicator(Editor *editor, int y, unsigned column) {
     if (editor->mode != EDIT_MODE_HEX) {
         return;
     }
-    x = HEX_X + (int)column * HEX_STEP + (editor->high_nibble ? 0 : 6);
-    nio_vram_fill((unsigned)x, (unsigned)(y + 8), 5, 2, NIO_COLOR_LIGHTYELLOW);
+    x = hex_x + (int)column * hex_step + (editor->high_nibble ? 0 : digit_width);
+    ui_fill(graphics, x, y + row_height - 2, digit_width, 2, theme->accent);
 }
 
 void ui_draw(Ui *ui, Editor *editor, const char *message) {
@@ -66,61 +122,53 @@ void ui_draw(Ui *ui, Editor *editor, const char *message) {
         return;
     }
     buffer = editor->buffer;
+    editor->visible_rows = (212 - ROW_Y) / row_height;
+    editor_ensure_visible(editor);
     size = file_buffer_size(buffer);
     have_current = size != 0 && editor_current_byte(editor, &current);
 
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
+    snprintf(text, sizeof(text), "nHex - %.28s%s", base_name(file_buffer_path(buffer)),
+             file_buffer_modified(buffer) ? " *" : "");
+    begin_screen(text);
 
-    snprintf(text, sizeof(text), "nHex - %.38s", base_name(file_buffer_path(buffer)));
-    draw_text(2, 1, text, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    if (file_buffer_modified(buffer)) {
-        draw_text(290, 1, "MOD", NIO_COLOR_WHITE, NIO_COLOR_LIGHTRED);
-    }
-
-    if (have_current) {
-        snprintf(text, sizeof(text), "Size:%llu Off:%08llX Byte:%02X %s %s",
-                 (unsigned long long)size,
-                 (unsigned long long)editor->cursor_offset,
-                 current,
-                 editor->mode == EDIT_MODE_HEX ? "HEX" : "ASCII",
-                 editor->mode == EDIT_MODE_HEX ? (editor->high_nibble ? "HIGH" : "LOW") : "");
-    } else {
-        snprintf(text, sizeof(text), "Size:%llu Off:%08llX Byte:-- %s %s",
-                 (unsigned long long)size,
-                 (unsigned long long)editor->cursor_offset,
-                 editor->mode == EDIT_MODE_HEX ? "HEX" : "ASCII",
-                 editor->mode == EDIT_MODE_HEX ? (editor->high_nibble ? "HIGH" : "LOW") : "");
-    }
-    draw_text(2, 13, text, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-
-    nio_vram_fill(0, 26, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(OFFSET_X, 30, "OFFSET", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+    snprintf(text, sizeof(text), "Size:%llu  %s %s",
+             (unsigned long long)size, editor->mode == EDIT_MODE_HEX ? "HEX" : "ASCII",
+             editor->mode == EDIT_MODE_HEX ? (editor->high_nibble ? "HIGH" : "LOW") : "");
+    ui_draw_text(graphics, text, 8, 24, Regular9, theme->muted);
+    if (have_current)
+        snprintf(text, sizeof(text), "Off:%016llX  Byte:%02X",
+                 (unsigned long long)editor->cursor_offset, current);
+    else
+        snprintf(text, sizeof(text), "Off:%016llX  Byte:--",
+                 (unsigned long long)editor->cursor_offset);
+    ui_draw_text(graphics, text, 8, 38, Regular9, theme->muted);
+    ui_draw_text(graphics, "OFFSET", 4, 52, Regular9, theme->muted);
     for (row = 0; row < NHEX_BYTES_PER_ROW; ++row) {
         snprintf(text, sizeof(text), "%X", row);
-        draw_text(HEX_X + (int)row * HEX_STEP + 3, 30, text,
-                  NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+        draw_cells(hex_x + (int)row * hex_step, 52, text, digit_width,
+                   theme->bg, theme->muted);
     }
-    draw_text(ASCII_X, 30, "ASCII", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+    ui_draw_text(graphics, "ASCII", ascii_x, 52, Regular9, theme->muted);
 
-    for (row = 0; row < NHEX_VISIBLE_ROWS; ++row) {
+    for (row = 0; row < editor->visible_rows; ++row) {
         uint64_t row_offset = editor->top_offset + (uint64_t)row * NHEX_BYTES_PER_ROW;
-        int y = ROW_Y + (int)row * ROW_HEIGHT;
+        int y = ROW_Y + (int)row * row_height;
         unsigned column;
         if (row_offset >= size) {
             break;
         }
         snprintf(text, sizeof(text), "%08llX", (unsigned long long)row_offset);
-        draw_text(OFFSET_X, y, text, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
+        draw_cells(4, y, text, digit_width, theme->bg, theme->muted);
 
         for (column = 0; column < NHEX_BYTES_PER_ROW; ++column) {
             uint64_t offset = row_offset + column;
             uint8_t value;
             char ascii[2];
             bool cursor;
-            int hex_background = NIO_COLOR_WHITE;
-            int hex_foreground = NIO_COLOR_BLACK;
-            int ascii_background = NIO_COLOR_WHITE;
-            int ascii_foreground = NIO_COLOR_BLACK;
+            int hex_background = theme->bg;
+            int hex_foreground = theme->fg;
+            int ascii_background = theme->bg;
+            int ascii_foreground = theme->fg;
 
             if (offset >= size || !file_buffer_read(buffer, offset, &value)) {
                 break;
@@ -128,43 +176,35 @@ void ui_draw(Ui *ui, Editor *editor, const char *message) {
             cursor = offset == editor->cursor_offset;
             if (cursor) {
                 if (editor->mode == EDIT_MODE_HEX) {
-                    hex_background = NIO_COLOR_BLUE;
-                    hex_foreground = NIO_COLOR_WHITE;
-                    ascii_background = NIO_COLOR_GRAY;
+                    hex_background = theme->highlight_bg;
+                    hex_foreground = theme->highlight_fg;
+                    ascii_background = 0xeeeeee;
                 } else {
-                    ascii_background = NIO_COLOR_BLUE;
-                    ascii_foreground = NIO_COLOR_WHITE;
-                    hex_background = NIO_COLOR_GRAY;
+                    ascii_background = theme->highlight_bg;
+                    ascii_foreground = theme->highlight_fg;
+                    hex_background = 0xeeeeee;
                 }
             }
 
             snprintf(text, sizeof(text), "%02X", value);
-            draw_text(HEX_X + (int)column * HEX_STEP, y, text,
-                      hex_background, hex_foreground);
+            draw_cells(hex_x + (int)column * hex_step, y, text,
+                       digit_width, hex_background, hex_foreground);
             ascii[0] = value >= 0x20 && value <= 0x7e ? (char)value : '.';
             ascii[1] = '\0';
-            draw_text(ASCII_X + (int)column * ASCII_STEP, y, ascii,
-                      ascii_background, ascii_foreground);
+            draw_cells(ascii_x + (int)column * ascii_width, y, ascii,
+                       ascii_width, ascii_background, ascii_foreground);
             if (cursor) {
                 draw_nibble_indicator(editor, y, column);
             }
         }
     }
 
-    nio_vram_fill(0, 215, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    if (message && message[0]) {
-        snprintf(text, sizeof(text), "%.52s", message);
-        draw_text(2, 220, text, NIO_COLOR_WHITE, NIO_COLOR_BLUE);
-    } else {
-        draw_text(2, 220, "Tab mode Ctrl+S save Ctrl+O open",
-                  NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    }
-    nio_vram_draw();
+    finish_screen(message && message[0] ? message : "Tab mode  Ctrl+S save  Ctrl+O open");
 }
 
 #define BROWSER_MAX_ITEMS 128
 #define BROWSER_NAME_MAX 128
-#define BROWSER_VISIBLE_ROWS 20
+#define BROWSER_VISIBLE_ROWS 8
 
 typedef struct {
     char name[BROWSER_NAME_MAX];
@@ -301,28 +341,17 @@ static char *browse_for_file(Ui *ui, const char *initial_path) {
             top = selected - BROWSER_VISIBLE_ROWS + 1;
         }
 
-        nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-        snprintf(text, sizeof(text), "Open: %.44s", base_name(directory));
-        draw_text(2, 2, text, NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-        snprintf(text, sizeof(text), "%.52s", directory);
-        draw_text(2, 13, text, NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        nio_vram_fill(0, 23, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
+        snprintf(text, sizeof(text), "Open: %.30s", base_name(directory));
+        begin_screen(text);
+        ui_draw_text(graphics, directory, 8, 26, Regular9, theme->muted);
         for (row = 0; row < BROWSER_VISIBLE_ROWS && top + row < count; ++row) {
             size_t index = top + row;
-            int y = 27 + (int)row * 9;
-            int background = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-            int foreground = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-            snprintf(text, sizeof(text), "%s%.47s",
+            snprintf(text, sizeof(text), "%s%s",
                      items[index].is_directory ? "[D] " : "    ", items[index].name);
-            draw_text(2, y, text, background, foreground);
+            ui_draw_row(graphics, theme, 48 + (int)row * 20, text, index == selected);
         }
-        if (count == 0) {
-            draw_text(2, 31, "(empty directory)", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        }
-        nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-        draw_text(2, 220, "Enter open/enter dir  Esc up/back",
-                  NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-        nio_vram_draw();
+        if (!count) ui_draw_text(graphics, "(empty directory)", 10, 48, Regular10, theme->muted);
+        finish_screen("Enter open/enter dir  Esc up/back");
 
         key = wait_browser_key();
         wait_no_key_pressed();
@@ -360,7 +389,16 @@ static char *browse_for_file(Ui *ui, const char *initial_path) {
 }
 
 void ui_message(const char *title, const char *message) {
-    show_msgbox(title, message);
+    begin_screen(title);
+    ui_draw_wrapped(graphics, message, 10, 40, 300, Regular10, theme->fg);
+    finish_screen("Enter/Esc back");
+    wait_no_key_pressed();
+    for (;;) {
+        if (isKeyPressed(KEY_NSPIRE_RET) || isKeyPressed(KEY_NSPIRE_ENTER) ||
+            isKeyPressed(KEY_NSPIRE_CLICK) || isKeyPressed(KEY_NSPIRE_ESC)) break;
+        msleep(10);
+    }
+    wait_no_key_pressed();
 }
 
 static void draw_save_confirmation(unsigned selected) {
@@ -370,23 +408,11 @@ static void draw_save_confirmation(unsigned selected) {
         "3  Cancel"
     };
     unsigned index;
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-    draw_text(2, 4, "nHex", NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    draw_text(2, 18, "Save changes?", NIO_COLOR_WHITE, NIO_COLOR_LIGHTRED);
-    draw_text(2, 31, "This file has unsaved modifications.",
-              NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_fill(0, 44, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index) {
-        int y = 72 + (int)index * 39;
-        int background = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-        int foreground = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-        nio_vram_fill(20, (unsigned)(y - 8), 280, 28, (unsigned)background);
-        draw_text(30, y, options[index], background, foreground);
-    }
-    nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(2, 220, "Up/Down choose Enter select Esc cancel",
-              NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_draw();
+    begin_screen("nHex - Save changes?");
+    ui_draw_text(graphics, "This file has unsaved modifications.", 10, 36, Regular9, theme->muted);
+    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index)
+        ui_draw_row(graphics, theme, 72 + (int)index * 32, options[index], index == selected);
+    finish_screen("Up/Down choose  Enter select  Esc cancel");
 }
 
 static int wait_save_confirmation_key(void) {
@@ -440,21 +466,10 @@ static void draw_open_menu(unsigned selected) {
         "4  Help", "5  About nHex", "6  Cancel"
     };
     unsigned index;
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-    draw_text(2, 4, "nHex - Open", NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    draw_text(2, 17, "Choose an action", NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_fill(0, 30, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index) {
-        int y = 43 + (int)index * 28;
-        int background = index == selected ? NIO_COLOR_BLUE : NIO_COLOR_WHITE;
-        int foreground = index == selected ? NIO_COLOR_WHITE : NIO_COLOR_BLACK;
-        nio_vram_fill(20, (unsigned)(y - 6), 280, 24, (unsigned)background);
-        draw_text(30, y, options[index], background, foreground);
-    }
-    nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(2, 220, "Up/Down choose Enter select Esc cancel",
-              NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_draw();
+    begin_screen("nHex - Open");
+    for (index = 0; index < sizeof(options) / sizeof(options[0]); ++index)
+        ui_draw_row(graphics, theme, 40 + (int)index * 26, options[index], index == selected);
+    finish_screen("Up/Down choose  Enter select  Esc cancel");
 }
 
 static int wait_open_menu_key(void) {
@@ -528,7 +543,7 @@ static int wait_information_key(void) {
     }
 }
 
-static void draw_information_page(bool about) {
+static void draw_information_page(unsigned page) {
     static const char *help_lines[] = {
         "Navigation",
         "Arrows        Move cursor",
@@ -564,54 +579,57 @@ static void draw_information_page(bool about) {
         "GNU GPL v3 licensed.",
         "No warranty; see LICENSE."
     };
+    bool about = page == 2;
     const char *const *lines = about ? about_lines : help_lines;
     size_t count = about ? sizeof(about_lines) / sizeof(about_lines[0])
                          : sizeof(help_lines) / sizeof(help_lines[0]);
-    size_t index;
-
-    nio_vram_fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, NIO_COLOR_WHITE);
-    draw_text(2, 3, about ? "About nHex" : "nHex Help",
-              NIO_COLOR_WHITE, NIO_COLOR_BLACK);
-    draw_text(284, 3, about ? "2/2" : "1/2",
-              NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_fill(0, 17, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    for (index = 0; index < count; ++index) {
-        bool heading = !about && (!strcmp(lines[index], "Navigation") ||
-                                  !strcmp(lines[index], "Editing") ||
-                                  !strcmp(lines[index], "Files"));
-        draw_text(6, 24 + (int)index * 9, lines[index], NIO_COLOR_WHITE,
-                  heading ? NIO_COLOR_BLUE : NIO_COLOR_BLACK);
-    }
-    nio_vram_fill(0, 211, SCREEN_WIDTH, 1, NIO_COLOR_GRAY);
-    draw_text(2, 220, "Left/Right switch  Enter/Esc back",
-              NIO_COLOR_WHITE, NIO_COLOR_LIGHTBLACK);
-    nio_vram_draw();
+    size_t index, start = about ? 0 : page * 10;
+    char title[48];
+    snprintf(title, sizeof(title), "%s  %u/3", about ? "About nHex" : "nHex Help", page + 1);
+    begin_screen(title);
+    for (index = start; index < count && index < start + (about ? 12 : 10); ++index)
+        ui_draw_text(graphics, lines[index], 10, 32 + (int)(index - start) * 14, Regular9, theme->fg);
+    finish_screen("Left/Right pages  Enter/Esc back");
 }
 
 static void show_information_pages(Ui *ui, bool about) {
+    unsigned page = about ? 2 : 0;
     if (!ui || !ui->initialized) {
         return;
     }
     wait_no_key_pressed();
     for (;;) {
         int direction;
-        draw_information_page(about);
+        draw_information_page(page);
         direction = wait_information_key();
         wait_no_key_pressed();
         if (direction == 0) {
             return;
         }
-        about = !about;
+        page = (page + (direction < 0 ? 2 : 1)) % 3;
     }
 }
 
 void ui_show_menu(Ui *ui) {
-    int choice;
-    if (!ui || !ui->initialized) {
-        return;
-    }
-    choice = (int)show_msgbox_3b("nHex", "Information", "Help", "About", "Cancel");
-    if (choice == 1 || choice == 2) {
-        show_information_pages(ui, choice == 2);
+    unsigned selected = 0;
+    static const char *items[] = {"Help", "About", "Cancel"};
+    if (!ui || !ui->initialized) return;
+    wait_no_key_pressed();
+    for (;;) {
+        unsigned index;
+        int key;
+        begin_screen("nHex - Information");
+        for (index = 0; index < 3; ++index)
+            ui_draw_row(graphics, theme, 48 + (int)index * 28, items[index], index == selected);
+        finish_screen("Up/Down choose  Enter select  Esc back");
+        key = wait_browser_key();
+        wait_no_key_pressed();
+        if (key == 1) selected = selected ? selected - 1 : 2;
+        else if (key == 2) selected = (selected + 1) % 3;
+        else if (key == 4) return;
+        else if (key == 3) {
+            if (selected == 2) return;
+            show_information_pages(ui, selected == 1);
+        }
     }
 }

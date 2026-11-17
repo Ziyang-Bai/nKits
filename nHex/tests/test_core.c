@@ -105,6 +105,13 @@ static bool test_cache_editor_and_safe_save(void) {
     CHECK(editor_move(&editor, EDIT_MOVE_DOWN) && editor.cursor_offset == 31);
     CHECK(editor_move(&editor, EDIT_MOVE_PAGE_DOWN) && editor.cursor_offset == 135);
     CHECK(editor_move(&editor, EDIT_MOVE_PAGE_UP) && editor.cursor_offset == 31);
+    editor.visible_rows = 5;
+    editor_ensure_visible(&editor);
+    CHECK(editor_move(&editor, EDIT_MOVE_PAGE_DOWN) && editor.cursor_offset == 71);
+    CHECK(editor.top_offset == 32);
+    CHECK(editor_move(&editor, EDIT_MOVE_PAGE_UP) && editor.cursor_offset == 31);
+    CHECK(editor.top_offset == 24);
+    editor.visible_rows = NHEX_VISIBLE_ROWS;
 
     for (page = 0; page < 9; ++page) {
         uint64_t offset = (uint64_t)page * NHEX_PAGE_SIZE + page;

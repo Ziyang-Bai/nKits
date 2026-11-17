@@ -395,10 +395,34 @@ static bool test_unicode_columns(void) {
     return true;
 }
 
+static bool test_measured_viewport(void) {
+    TextBuffer buffer;
+    Editor editor;
+
+    CHECK(write_fixture(INPUT_PATH, "abcdef\nabcdef\nabcdef\nabcdef\n"));
+    CHECK(text_buffer_open(&buffer, INPUT_PATH));
+    editor_init(&editor, &buffer);
+    editor.visible_rows = 2;
+    editor.visible_columns = 3;
+    CHECK(editor_move(&editor, EDIT_MOVE_END));
+    CHECK(editor_column(&editor) == 6 && editor.left_column == 4);
+    CHECK(editor_move(&editor, EDIT_MOVE_PAGE_DOWN));
+    CHECK(editor_line_number(&editor) == 3 && editor_column(&editor) == 6);
+    CHECK(editor.top_offset == 7);
+    CHECK(editor_move(&editor, EDIT_MOVE_PAGE_UP));
+    CHECK(editor_line_number(&editor) == 1 && editor.top_offset == 0);
+    CHECK(editor_move(&editor, EDIT_MOVE_HOME));
+    CHECK(editor.left_column == 0);
+    text_buffer_close(&buffer);
+    remove(INPUT_PATH);
+    return true;
+}
+
 int main(void) {
     if (!test_edit_navigation_and_save() || !test_empty_file() ||
         !test_create_arbitrary_extension() || !test_unicode_edit_and_save() ||
-        !test_utf8_boundaries() || !test_malformed_bytes() || !test_unicode_columns()) return 1;
+        !test_utf8_boundaries() || !test_malformed_bytes() || !test_unicode_columns() ||
+        !test_measured_viewport()) return 1;
     puts("PASS nEdit: UTF-8 editing, navigation, viewport, safe save");
     return 0;
 }

@@ -3,6 +3,7 @@
 #include "resident.h"
 #include "resident_build.h"
 #include "version.h"
+#include "common/draw.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -460,7 +461,7 @@ static void event(void *data, struct s_ns_event *ev) {
 
 static void box(int x, int y, int w, int h, uint32_t c) { theme_ui_box(x, y, w, h, c); }
 static void text(int x, int y, const char *s, uint32_t c) { theme_ui_text(x, y, s, c); }
-static void frame(void) { theme_ui_clear(); }
+static void frame(const char *heading) { theme_ui_clear(heading); }
 static void present(void) {
     if (native) resident_present_screen(theme_ui_pixels());
     else lcd_blit(theme_ui_pixels(), SCR_320x240_565);
@@ -591,27 +592,29 @@ static void picker(void) {
         hex_held = digit >= 0;
         if (key & INVERT) value ^= 0xffffff;
         if (key & RANDOM) { app->seed = app->seed * 1664525u + 1013904223u; value = app->seed & 0xffffff; }
-        frame();
-        text(8, 8, app->theme.names[app->index], 0);
-        text(24, 36, "R             G             B", 0);
+        frame(app->theme.names[app->index]);
+        text(24, 36, "R", ui_themes[0].fg);
+        text(96, 36, "G", ui_themes[0].fg);
+        text(168, 36, "B", ui_themes[0].fg);
         for (unsigned c = 0; c < 3; ++c) {
             unsigned b = (value >> ((2 - c) * 8)) & 255;
             char line[24];
-            box(24 + (int)c * 72, 64, 42, 124, c == channel ? 0x206090 : 0xc0c0c0);
-            box(28 + (int)c * 72, 184 - (int)b * 116 / 255, 34, (int)b * 116 / 255, 0x808080);
+            box(24 + (int)c * 72, 64, 42, 108, c == channel ? ui_themes[0].accent : ui_themes[0].highlight_bg);
+            box(28 + (int)c * 72, 168 - (int)b * 100 / 255, 34, (int)b * 100 / 255, ui_themes[0].muted);
             snprintf(line, sizeof(line), "%02X / %u", b, b);
-            text(22 + (int)c * 72, 192, line, 0);
+            text(22 + (int)c * 72, 176, line, ui_themes[0].fg);
         }
         box(250, 54, 60, 60, old); box(250, 134, 60, 60, value);
-        text(250, 38, "Old", 0); text(250, 118, "New", 0);
-        text(8, 214, "Arrows: RGB  0-9 A-F: hex  I/R: invert/random", 0);
-        text(8, 228, "Enter: apply    Esc: cancel", 0);
+        text(250, 34, "Old", ui_themes[0].fg); text(250, 114, "New", ui_themes[0].fg);
+        theme_ui_hint(198, "Arrows: RGB  0-9/A-F: hex  I/R: invert/random");
+        theme_ui_footer("Enter: apply    Esc: cancel");
         present(); pause_ui();
     }
     release_keys();
 }
 
 static void drawn_editor(void) {
+    if (!theme_ui_open(native)) { message("Cannot open the editor display."); return; }
     unsigned previous = 0, repeat = 0, offset = 0;
     release_keys();
     while (!app->removed) {
@@ -627,29 +630,27 @@ static void drawn_editor(void) {
         if (key & INVERT) { theme_invert(&app->theme, 0, app->theme.count, app->column); apply(); }
         if (key & RANDOM) { theme_random(&app->theme, 0, app->theme.count, app->column, &app->seed); apply(); }
         if (key & MENU) { native_editor(); release_keys(); previous = repeat = 0; }
-        frame();
         char line[128];
         snprintf(line, sizeof(line), "ThemeEditor   %u/%u   %s%s", app->index + 1, app->theme.count,
                  app->column ? "Color" : "B&W", app->dirty ? " *" : "");
-        text(6, 4, line, 0);
-        unsigned first = app->index >= 11 ? app->index - 10 : 0;
-        for (unsigned i = first; i < app->theme.count && i < first + 11; ++i) {
-            int y = 24 + (int)(i - first) * 15;
-            bool selected = i == app->index;
-            if (selected) box(0, y - 1, 292, 15, 0x205a90);
+        frame(line);
+        unsigned first = app->index >= 8 ? app->index - 7 : 0;
+        for (unsigned i = first; i < app->theme.count && i < first + 8; ++i) {
+            int y = 30 + (int)(i - first) * 20;
             const char *name = app->theme.names[i];
             size_t len = strlen(name);
             snprintf(line, sizeof(line), "%.48s", name + (offset < len ? offset : len));
-            text(6, y, line, selected ? 0xffffff : 0);
-            box(298, y, 16, 12, app->theme.colors[i][app->column]);
+            theme_ui_row(y, line, i == app->index);
+            box(294, y + 1, 16, 14, app->theme.colors[i][app->column]);
         }
         snprintf(line, sizeof(line), "RGB #%06lX   %.38s", (unsigned long)app->theme.colors[app->index][app->column], app->path[0] ? app->path : "Unsaved theme");
-        text(6, 194, line, 0);
-        text(6, 210, "Enter: RGB  I/R: invert/random ALL  Tab: column", 0);
-        text(6, 226, "Menu: files/options/live  Esc: save + exit", 0);
+        theme_ui_hint(188, line);
+        theme_ui_hint(202, "Enter: RGB  I/R: invert/random ALL  Tab: column");
+        theme_ui_footer("Menu: files/options/live  Esc: save + exit");
         present(); pause_ui();
     }
     release_keys();
+    theme_ui_close();
 }
 
 static bool originals(void) {
@@ -695,6 +696,7 @@ int app_run(int argc, char **argv) {
     bool fresh;
     const char *error;
     native = false;
+    theme_ui_init();
     quiet = nl_isstartup();
     app = resident_install(0x6e54484du, NKITS_BUILD_ID, &storage, sizeof(storage), tick, event, &fresh, &error);
     if (!app) { if (!quiet) show_msgbox(title, error); quiet = false; return 1; }

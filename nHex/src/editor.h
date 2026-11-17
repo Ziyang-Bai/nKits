@@ -32,6 +32,7 @@ typedef struct {
     uint64_t top_offset;
     EditMode mode;
     bool high_nibble;
+    unsigned visible_rows;
 } Editor;
 
 void editor_init(Editor *editor, FileBuffer *buffer);

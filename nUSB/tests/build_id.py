@@ -112,6 +112,7 @@ def main():
         add_bytes(digest, "version/" + name,
                   run(command + ["--version"], root).encode("utf-8"))
     sources = [root.parent / "version.h", root / "Makefile", Path(__file__).resolve()]
+    sources.extend(root.parent / "common" / name for name in ("draw.c", "draw.h"))
     sources.extend(root / name for name in args.extra_source)
     for directory in (root / "src", root / "third_party" / "fatfs"):
         if not directory.is_dir():

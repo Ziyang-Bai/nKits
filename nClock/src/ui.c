@@ -2,11 +2,13 @@
 #include "ui.h"
 #include "resident.h"
 #include "diagnose.h"
+#include "../../common/ui.h"
 
-#include <stdlib.h>
-#include <string.h>
+#include <stdio.h>
 
 static uint16_t *screen;
+static UiCanvas canvas;
+static const UiTheme *const theme = &ui_themes[0];
 static ClockService service;
 static unsigned saved_brightness;
 static unsigned original_brightness;
@@ -34,11 +36,6 @@ static unsigned keys(void) {
     return value;
 }
 
-static void fill(uint16_t color) {
-    unsigned i;
-    for (i = 0; i < 320 * 240; ++i) screen[i] = color;
-}
-
 static void present(const Clock *clock) {
     if (clock->flip) {
         unsigned i;
@@ -53,11 +50,11 @@ static void present(const Clock *clock) {
 
 bool clock_ui_open(ClockService callback) {
     clock_diag("ui.alloc.before", 320 * 240 * sizeof(*screen));
-    screen = malloc(320 * 240 * sizeof(*screen));
+    if (!ui_canvas_open(&canvas)) return false;
+    screen = ui_canvas_pixels(&canvas);
     clock_diag("ui.alloc.after", (unsigned)(uintptr_t)screen);
-    if (!screen) return false;
     if (!clock_power_open()) {
-        free(screen);
+        ui_canvas_close(&canvas);
         screen = NULL;
         return false;
     }
@@ -88,7 +85,7 @@ void clock_ui_level(unsigned value) {
 void clock_ui_close(void) {
     clock_power_on();
     clock_ui_set_brightness(original_brightness);
-    free(screen);
+    ui_canvas_close(&canvas);
     screen = NULL;
     refresh_osscr();
     TCT_Local_Control_Interrupts(original_interrupts);
@@ -122,13 +119,49 @@ static unsigned input(Clock *clock, unsigned *previous, unsigned *repeat) {
     return result;
 }
 
+void clock_ui_date(const Clock *clock, uint32_t raw, char text[80]) {
+    static const char *const en[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *const zh[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+    static const char *const fr[] = {"dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."};
+    int64_t value = clock_time(clock, raw);
+    ClockDate date;
+    if (value < 0) value = 0;
+    if (value > CLOCK_LAST_SECOND) value = CLOCK_LAST_SECOND;
+    clock_to_date(value, &date);
+    unsigned day = (unsigned)(value / 86400 + 4) % 7;
+    snprintf(text, 80, "%04d-%02d-%02d %s", date.year, date.month, date.day,
+        ui_text_for((UiLanguage)clock->language, en[day], zh[day], fr[day]));
+}
+
+static void labels(const Clock *clock, uint32_t raw) {
+    char text[80];
+    if (clock->countdown) {
+        snprintf(text, sizeof(text), clock->reboot ?
+            ui_text("Restart in: %lu d", "%lu 天后重启", "Redémarrage : %lu j") :
+            ui_text("Countdown: %lu d", "剩余 %lu 天", "Minuteur : %lu j"),
+            (unsigned long)(clock_remaining(clock, raw) / 86400));
+        ui_draw_text(canvas.gc, text, 10, 30, Regular10, theme->fg);
+    }
+    if (clock->hour12) {
+        bool afternoon = clock_time(clock, raw) % 86400 >= 43200;
+        ui_draw_text(canvas.gc, afternoon ?
+            ui_text("PM", "下午", "PM") : ui_text("AM", "上午", "AM"),
+            274, 128, Regular10, theme->fg);
+    }
+    clock_ui_date(clock, raw, text);
+    ui_draw_text(canvas.gc, text, 92, 168, Regular10, theme->muted);
+}
+
 int clock_ui_menu(Clock *clock, const char *title, const char *const *items, unsigned count, bool big) {
     unsigned selected = 0, previous = 0, repeat = 0;
+    unsigned drawn_selection = count;
+    uint32_t drawn_time = 0;
     clock_ui_wake();
     wait_no_key_pressed();
     for (;;) {
         clock_diag("menu.input.before", 0);
         uint32_t raw = resident_seconds();
+        bool was_dimmed = dimmed;
         unsigned key = input(clock, &previous, &repeat), i, first = 0;
         clock_diag("menu.input.after", key);
         if (key & KEY_BACK) { wait_no_key_pressed(); return -1; }
@@ -141,18 +174,32 @@ int clock_ui_menu(Clock *clock, const char *title, const char *const *items, uns
             dimmed = true;
             wait_no_key_pressed();
         }
-        fill(0xffff);
-        clock_label(screen, (320 - (int)strlen(title) * 6) / 2, 10, title, 0, 0xffff);
-        if (big) {
-            clock_big(clock, raw, screen);
-            for (i = 0; i < count; ++i)
-                clock_label(screen, 12 + (int)i * 104, 204, items[i], i == selected ? 0xffff : 0, i == selected ? 0x001f : 0xffff);
-        } else {
-            if (selected >= 10) first = selected - 9;
-            for (i = first; i < count && i < first + 10; ++i)
-                clock_label(screen, 14, 34 + (int)(i - first) * 17, items[i], i == selected ? 0xffff : 0, i == selected ? 0x001f : 0xffff);
+        if (dimmed || (raw == drawn_time && selected == drawn_selection && was_dimmed == dimmed)) {
+            msleep(30);
+            continue;
         }
-        clock_label(screen, 14, 228, "ARROWS: SELECT  ENTER: OK  ESC: BACK", 0x4208, 0xffff);
+        drawn_time = raw;
+        drawn_selection = selected;
+        ui_canvas_begin(&canvas);
+        screen = ui_canvas_pixels(&canvas);
+        ui_draw_header(canvas.gc, theme, title);
+        if (big) {
+            char text[160];
+            clock_big(clock, raw, screen);
+            labels(clock, raw);
+            snprintf(text, sizeof(text), "%s (%u/%u)", items[selected], selected + 1, count);
+            ui_draw_row(canvas.gc, theme, 194, text, true);
+        } else {
+            if (selected >= 9) first = selected - 8;
+            for (i = first; i < count && i < first + 9; ++i)
+                ui_draw_row(canvas.gc, theme, 32 + (int)(i - first) * 20, items[i], i == selected);
+        }
+        ui_draw_footer(canvas.gc, theme,
+            ui_text("Arrows: select  Enter: open  Esc: back",
+                    "方向键选择  Enter 打开  Esc 返回",
+                    "Flèches : choisir  Entrée : ouvrir  Échap : retour"));
+        ui_canvas_end(&canvas);
+        screen = ui_canvas_pixels(&canvas);
         present(clock);
         msleep(30);
 #ifdef NCLOCK_DIAGNOSTIC
@@ -178,9 +225,17 @@ void clock_ui_position(Clock *clock) {
         if (key & KEY_DOWN) clock_move(clock, 0, step);
         if (key & KEY_LEFT) clock_move(clock, -step, 0);
         if (key & KEY_RIGHT) clock_move(clock, step, 0);
-        fill(0xffff);
-        clock_label(screen, 20, 100, "MOVE WITH ARROWS / TOUCHPAD", 0, 0xffff);
-        clock_label(screen, 20, 116, "SHIFT: 10 PX  ENTER: SAVE  ESC: CANCEL", 0, 0xffff);
+        ui_canvas_begin(&canvas);
+        screen = ui_canvas_pixels(&canvas);
+        ui_draw_header(canvas.gc, theme, ui_text("Clock position", "小钟位置", "Position de l'horloge"));
+        ui_draw_text(canvas.gc,
+            ui_text("Arrows: move  Shift: 10 px", "方向键移动  Shift：10 像素",
+                    "Flèches : déplacer  Maj : 10 px"), 10, 94, Regular10, theme->fg);
+        ui_draw_footer(canvas.gc, theme,
+            ui_text("Enter: save  Esc: cancel", "Enter 保存  Esc 取消",
+                    "Entrée : enregistrer  Échap : annuler"));
+        ui_canvas_end(&canvas);
+        screen = ui_canvas_pixels(&canvas);
         clock_draw(clock, resident_seconds(), screen);
         present(clock);
         msleep(30);

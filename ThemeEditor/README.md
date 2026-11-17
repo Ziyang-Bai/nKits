@@ -14,6 +14,7 @@ nKits 的 TI-Nspire 原生系统配色编辑器。面向 CX / CX II 的 CAS 与�
 ## 使用
 
 打开 `themeeditor.tns`。默认进入列表；选中色项后按 Enter 编辑，确认后应用。
+列表和拾色器使用与 nTexts 一致的系统字体、配色和提示栏；实时编辑仍保留系统原生对话框。
 按 Esc 保存当前主题并退出；首次修改默认保存到 `mytheme.theme.tns`。
 按 Menu 打开“Colors / Files / Options”，可另存为、新建、恢复原色或卸载。
 实时模式中，每次确认一个 RGB 分量即刻应用；Esc 不撤销已经确认的改动。
@@ -63,4 +64,4 @@ make host-test
 操作与主题格式参考其[原版说明](https://tiplanet.org/forum/archives/zipview.php?id=6070&zipFileID=2)；
 色项含义可参考 Persalteas / Levak 的[配色说明](https://tiplanet.org/forum/archives_voir.php?id=6735)。
 本项目以原版公开功能和说明为依据独立重制，属于 nKits，使用仓库根目录的
-[GNU General Public License v3.0](../LICENSE)；位图字形沿用 nClock 的 GPL 授权实现。
+[GNU General Public License v3.0](../LICENSE)。

@@ -1,85 +1,121 @@
 #include "ui.h"
+#include "common/draw.h"
+#include "resident.h"
 
-/* Digit/uppercase glyphs follow nClock's GPL-3.0-or-later bitmap font. */
-static const unsigned char font[][5] = {
-    {0x3e,0x51,0x49,0x45,0x3e},{0,0x42,0x7f,0x40,0},
-    {0x42,0x61,0x51,0x49,0x46},{0x21,0x41,0x45,0x4b,0x31},
-    {0x18,0x14,0x12,0x7f,0x10},{0x27,0x45,0x45,0x45,0x39},
-    {0x3c,0x4a,0x49,0x49,0x30},{1,0x71,9,5,3},
-    {0x36,0x49,0x49,0x49,0x36},{6,0x49,0x49,0x29,0x1e},
-    {0x7e,0x11,0x11,0x11,0x7e},{0x7f,0x49,0x49,0x49,0x36},
-    {0x3e,0x41,0x41,0x41,0x22},{0x7f,0x41,0x41,0x22,0x1c},
-    {0x7f,0x49,0x49,0x49,0x41},{0x7f,9,9,9,1},
-    {0x3e,0x41,0x49,0x49,0x7a},{0x7f,8,8,8,0x7f},
-    {0,0x41,0x7f,0x41,0},{0x20,0x40,0x41,0x3f,1},
-    {0x7f,8,0x14,0x22,0x41},{0x7f,0x40,0x40,0x40,0x40},
-    {0x7f,2,0x0c,2,0x7f},{0x7f,4,8,0x10,0x7f},
-    {0x3e,0x41,0x41,0x41,0x3e},{0x7f,9,9,9,6},
-    {0x3e,0x41,0x51,0x21,0x5e},{0x7f,9,0x19,0x29,0x46},
-    {0x46,0x49,0x49,0x49,0x31},{1,1,0x7f,1,1},
-    {0x3f,0x40,0x40,0x40,0x3f},{0x1f,0x20,0x40,0x20,0x1f},
-    {0x3f,0x40,0x38,0x40,0x3f},{0x63,0x14,8,0x14,0x63},
-    {7,8,0x70,8,7},{0x61,0x51,0x49,0x45,0x43}
-};
-static const unsigned char lower[][5] = {
-    {0x20,0x54,0x54,0x54,0x78},{0x7f,0x48,0x44,0x44,0x38},
-    {0x38,0x44,0x44,0x44,0x20},{0x38,0x44,0x44,0x48,0x7f},
-    {0x38,0x54,0x54,0x54,0x18},{8,0x7e,9,1,2},
-    {0x0c,0x52,0x52,0x52,0x3e},{0x7f,8,4,4,0x78},
-    {0,0x44,0x7d,0x40,0},{0x20,0x40,0x44,0x3d,0},
-    {0x7f,0x10,0x28,0x44,0},{0,0x41,0x7f,0x40,0},
-    {0x7c,4,0x18,4,0x78},{0x7c,8,4,4,0x78},
-    {0x38,0x44,0x44,0x44,0x38},{0x7c,0x14,0x14,0x14,8},
-    {8,0x14,0x14,0x18,0x7c},{0x7c,8,4,4,8},
-    {0x48,0x54,0x54,0x54,0x20},{4,0x3f,0x44,0x40,0x20},
-    {0x3c,0x40,0x40,0x20,0x7c},{0x1c,0x20,0x40,0x20,0x1c},
-    {0x3c,0x40,0x30,0x40,0x3c},{0x44,0x28,0x10,0x28,0x44},
-    {0x0c,0x50,0x50,0x50,0x3c},{0x44,0x64,0x54,0x4c,0x44}
-};
-static uint16_t pixels[320 * 240];
+static Gc source, graphics;
+static bool native;
+static unsigned mask;
+static int (*begin)(Gc);
+static void (*finish)(Gc);
+static void (*release)(Gc);
+static void (*font)(Gc, gui_gc_Font);
+static void (*color)(Gc, int, int, int);
+static void (*fill)(Gc, int, int, int, int);
+static void (*draw)(Gc, char *, int, int, gui_gc_StringMode);
+static void (*clip)(Gc, int, int, int, int, gui_gc_ClipRectOp);
 
-static uint16_t rgb(uint32_t c) {
-    return (uint16_t)(((c >> 8) & 0xf800) | ((c >> 5) & 0x07e0) | ((c >> 3) & 0x001f));
+void theme_ui_init(void) { source = gui_gc_global_GC(); }
+
+bool theme_ui_open(bool callback) {
+    native = callback;
+    /* GC calls can change interrupt masks; preserve the event caller's state. */
+    unsigned saved = resident_lock();
+    resident_unlock(saved);
+    if (native) {
+        Gc (*copy)(Gc, int, int) = resident_native(e_gui_gc_copy);
+        void (*region)(Gc, int, int, int, int, int, int, int, int) =
+            resident_native(e_gui_gc_setRegion);
+        begin = resident_native(e_gui_gc_begin);
+        finish = resident_native(e_gui_gc_finish);
+        release = resident_native(e_gui_gc_free);
+        font = resident_native(e_gui_gc_setFont);
+        color = resident_native(e_gui_gc_setColorRGB);
+        fill = resident_native(e_gui_gc_fillRect);
+        draw = resident_native(e_gui_gc_drawString);
+        clip = resident_native(e_gui_gc_clipRect);
+        if (!source || !copy || !region || !begin || !finish || !release ||
+            !font || !color || !fill || !draw || !clip) {
+            resident_unlock(saved);
+            return false;
+        }
+        graphics = copy(source, UI_WIDTH, UI_HEIGHT);
+        if (graphics) region(graphics, 0, 0, UI_WIDTH, UI_HEIGHT, 0, 0, UI_WIDTH, UI_HEIGHT);
+    } else {
+        graphics = source ? gui_gc_copy(source, UI_WIDTH, UI_HEIGHT) : NULL;
+        if (graphics) gui_gc_setRegion(graphics, 0, 0, UI_WIDTH, UI_HEIGHT, 0, 0, UI_WIDTH, UI_HEIGHT);
+    }
+    resident_unlock(saved);
+    return graphics != NULL;
 }
 
-void theme_ui_box(int x, int y, int w, int h, uint32_t c) {
-    uint16_t color = rgb(c);
-    int right = x + w, bottom = y + h;
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (right > 320) right = 320;
-    if (bottom > 240) bottom = 240;
-    for (int row = y; row < bottom; ++row)
-        for (int col = x; col < right; ++col) pixels[row * 320 + col] = color;
+void theme_ui_close(void) {
+    unsigned saved = resident_lock();
+    resident_unlock(saved);
+    if (native) release(graphics);
+    else gui_gc_free(graphics);
+    graphics = NULL;
+    resident_unlock(saved);
 }
 
-void theme_ui_clear(void) { theme_ui_box(0, 0, 320, 240, 0xffffff); }
+void theme_ui_box(int x, int y, int w, int h, uint32_t rgb) {
+    if (!native) { ui_fill(graphics, x, y, w, h, rgb); return; }
+    color(graphics, (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+    fill(graphics, x, y, w, h);
+}
 
-void theme_ui_text(int x, int y, const char *text, uint32_t color) {
-    static const unsigned char blank[5] = {0}, colon[5] = {0,0x36,0x36,0,0},
-        dash[5] = {8,8,8,8,8}, dot[5] = {0,0x60,0x60,0,0},
-        slash[5] = {0x20,0x10,8,4,2}, star[5] = {0x14,8,0x3e,8,0x14},
-        hash[5] = {0x14,0x7f,0x14,0x7f,0x14}, equal[5] = {0x14,0x14,0x14,0x14,0x14},
-        plus[5] = {8,8,0x3e,8,8}, underscore[5] = {0x40,0x40,0x40,0x40,0x40};
-    for (; *text && x < 320; ++text, x += 6) {
-        unsigned ch = (unsigned char)*text;
-        const unsigned char *bits = blank;
-        if (ch >= '0' && ch <= '9') bits = font[ch - '0'];
-        else if (ch >= 'A' && ch <= 'Z') bits = font[ch - 'A' + 10];
-        else if (ch >= 'a' && ch <= 'z') bits = lower[ch - 'a'];
-        else if (ch == ':') bits = colon;
-        else if (ch == '-') bits = dash;
-        else if (ch == '.') bits = dot;
-        else if (ch == '/') bits = slash;
-        else if (ch == '*') bits = star;
-        else if (ch == '#') bits = hash;
-        else if (ch == '=') bits = equal;
-        else if (ch == '+') bits = plus;
-        else if (ch == '_') bits = underscore;
-        for (unsigned col = 0; col < 5; ++col)
-            for (unsigned row = 0; row < 7; ++row)
-                if (bits[col] & (1u << row)) theme_ui_box(x + (int)col, y + (int)row, 1, 1, color);
+static void text(int x, int y, const char *s, gui_gc_Font size, int rgb) {
+    if (!native) { ui_draw_text(graphics, s, x, y, size, rgb); return; }
+    uint16_t line[UI_LINE_UNITS];
+    ui_utf8_to_u16(s, line, UI_LINE_UNITS);
+    font(graphics, size);
+    color(graphics, (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+    draw(graphics, (char *)line, x, y, GC_SM_TOP);
+}
+
+static void text_clip(int x, int width) {
+    if (native) clip(graphics, x, 0, width, UI_HEIGHT, GC_CRO_SET);
+    else gui_gc_clipRect(graphics, x, 0, width, UI_HEIGHT, GC_CRO_SET);
+}
+
+void theme_ui_clear(const char *title) {
+    mask = resident_lock();
+    resident_unlock(mask);
+    if (native) begin(graphics);
+    else gui_gc_begin(graphics);
+    text_clip(0, UI_WIDTH);
+    if (!native) ui_draw_header(graphics, &ui_themes[0], title);
+    else {
+        theme_ui_box(0, 0, UI_WIDTH, UI_HEIGHT, ui_themes[0].bg);
+        text(8, 6, title, Bold12, ui_themes[0].fg);
     }
 }
 
-uint16_t *theme_ui_pixels(void) { return pixels; }
+void theme_ui_text(int x, int y, const char *s, uint32_t rgb) {
+    text_clip(x, 312 - x);
+    text(x, y, s, Regular10, rgb);
+    text_clip(0, UI_WIDTH);
+}
+
+void theme_ui_row(int y, const char *s, bool selected) {
+    if (!native) ui_draw_row(graphics, &ui_themes[0], y, "", selected);
+    else if (selected) theme_ui_box(4, y - 2, UI_WIDTH - 8, 20, ui_themes[0].highlight_bg);
+    text_clip(10, 274);
+    text(10, y, s, Regular10, selected ? ui_themes[0].highlight_fg : ui_themes[0].fg);
+    text_clip(0, UI_WIDTH);
+}
+
+void theme_ui_hint(int y, const char *s) { text(8, y, s, Regular9, ui_themes[0].muted); }
+
+void theme_ui_footer(const char *s) {
+    if (!native) ui_draw_footer(graphics, &ui_themes[0], s);
+    else theme_ui_hint(UI_FOOTER_Y, s);
+}
+
+uint16_t *theme_ui_pixels(void) {
+    if (native) finish(graphics);
+    else gui_gc_finish(graphics);
+    resident_unlock(mask);
+    /* Same logical RGB565 surface walk as SDK gui_gc_blit_to_screen. */
+    void **surface = *(void ***)graphics[9];
+    return *(uint16_t **)surface[8];
+}

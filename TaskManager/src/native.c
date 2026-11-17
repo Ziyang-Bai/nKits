@@ -131,8 +131,8 @@ bool native_open(const char **error) {
         0xe1a06002u, 0xe1a07003u
     };
     uint32_t marker = *(volatile uint32_t *)0x10000020u;
-    *error = "CX 4.5.5.79 / CX II 6.4.0.74 and Ndless r2022 required";
-    if (hwtype() != 1 || nl_hwsubtype() == 1 || nl_ndless_rev() < 2022 ||
+    *error = "CX 4.5.5.79 / CX II 6.4.0.74 and Ndless r2023 required";
+    if (hwtype() != 1 || nl_hwsubtype() == 1 || nl_ndless_rev() < 2023 ||
         (marker != 0x103b18e0u && marker != 0x103b1f80u &&
          marker != 0x10429ec0u && marker != 0x1042aee0u)) return false;
 

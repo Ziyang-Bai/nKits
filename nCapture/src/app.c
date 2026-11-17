@@ -28,6 +28,7 @@
 #include "capture.h"
 #include "resident_build.h"
 #include "version.h"
+#include "ui.h"
 
 #define CAPTURE_ID 0x4e434150u
 
@@ -52,6 +53,7 @@ typedef struct {
     CaptureResult result;
     uint16_t pixels[CAPTURE_WIDTH * CAPTURE_HEIGHT];
     uint16_t frame[CAPTURE_WIDTH * CAPTURE_HEIGHT];
+    UiLanguage language;
 } Capture;
 
 static Capture storage;
@@ -89,13 +91,7 @@ static bool capture_tick(void *data) {
 }
 
 static void save_as(Capture *capture) {
-    static const uint16_t title[] = {'n','C','a','p','t','u','r','e',0};
-    static const uint16_t message[] = {
-        'R','e','p','l','a','c','e',' ','e','x','i','s','t','i','n','g',' ',
-        'f','i','l','e','?',0
-    };
-    static const uint16_t cancel[] = {'C','a','n','c','e','l',0};
-    static const uint16_t replace_label[] = {'R','e','p','l','a','c','e',0};
+    uint16_t title[16], message[64], cancel[16], replace_label[16];
     capture->busy = 1;
     int result = resident_save_dialog(capture->folder, capture->name,
                                       &capture->modal_release);
@@ -117,12 +113,28 @@ static void save_as(Capture *capture) {
                 if (resident_close(fd) < 0) {
                     outcome = (CaptureResult){CAPTURE_CLOSE_ERROR, resident_errno(), 0, 0};
                 } else {
-                    int choice = resident_question(title, message, cancel, replace_label,
-                                                   &capture->modal_release);
-                    if (choice != 2) {
-                        if (choice >= 0 || !resident_errno()) goto finished;
-                        outcome = (CaptureResult){CAPTURE_DIALOG_ERROR, resident_errno(), 0, 0};
-                    } else replace = 1;
+                    void (*convert)(void *, const char *, int) = resident_native(e_ascii2utf16);
+                    if (!convert) {
+                        outcome = (CaptureResult){CAPTURE_DIALOG_ERROR, ENOSYS, 0, 0};
+                    } else {
+                        const char *text = ui_text_for(capture->language,
+                            "Replace file?", "替换文件？", "Remplacer le fichier ?");
+                        size_t (*length)(const char *) = resident_native(e_strlen);
+                        const char *heading = ui_text_for(capture->language,
+                            "Replace file", "替换文件", "Remplacer");
+                        convert(title, heading, length(heading) + 1);
+                        convert(message, text, length(text) + 1);
+                        text = ui_text_for(capture->language, "Cancel", "取消", "Annuler");
+                        convert(cancel, text, length(text) + 1);
+                        text = ui_text_for(capture->language, "Replace", "替换", "Remplacer");
+                        convert(replace_label, text, length(text) + 1);
+                        int choice = resident_question(title, message, cancel, replace_label,
+                                                       &capture->modal_release);
+                        if (choice != 2) {
+                            if (choice >= 0 || !resident_errno()) goto finished;
+                            outcome = (CaptureResult){CAPTURE_DIALOG_ERROR, resident_errno(), 0, 0};
+                        } else replace = 1;
+                    }
                 }
             } else if (resident_errno() != ENOENT) {
                 outcome = (CaptureResult){CAPTURE_OPEN_ERROR, resident_errno(), 0, 0};
@@ -178,7 +190,7 @@ static void capture_event(void *data, struct s_ns_event *event) {
             } else { save = action == 1; close = action == 2; }
         }
         if ((event->click & 8) && type != 16 && !capture->action_held &&
-            event->cursor_y >= 194 && event->cursor_y < 219) {
+            event->cursor_y >= 190 && event->cursor_y < 212) {
             close = event->cursor_x >= 36 && event->cursor_x < 146;
             save = event->cursor_x >= 160 && event->cursor_x < 284;
             if (save || close) {
@@ -197,7 +209,7 @@ static void capture_event(void *data, struct s_ns_event *event) {
     if (!shortcut || !capture->enabled) return;
     event->type = 0;
     if (!pressed) return;
-    /* Preserve the displayed image before painting the logical preview target. */
+    /* Preserve the OS page before painting the logical preview target. */
     capture->no_display = !resident_copy_screen(capture->pixels);
     if (capture->no_display) return;
     volatile uint16_t *screen = resident_framebuffer();
@@ -209,11 +221,9 @@ static void capture_event(void *data, struct s_ns_event *event) {
 
 static void label(Gc gc, int x, int y, const char *text,
                   void (*draw)(Gc, char *, int, int, gui_gc_StringMode)) {
-    uint16_t line[64];
-    unsigned i;
-    for (i = 0; text[i] && i < 63; ++i) line[i] = (unsigned char)text[i];
-    line[i] = 0;
-    draw(gc, (char *)line, x, y - 4, GC_SM_TOP);
+    uint16_t line[UI_LINE_UNITS];
+    ui_utf8_to_u16(text, line, UI_LINE_UNITS);
+    draw(gc, (char *)line, x, y, GC_SM_TOP);
 }
 
 static int preview_frame(Capture *capture) {
@@ -231,21 +241,31 @@ static int preview_frame(Capture *capture) {
     Gc gc = copy(frame_source, CAPTURE_WIDTH, CAPTURE_HEIGHT);
     if (!gc) return 0;
     begin(gc);
-    font(gc, Regular10);
-    color(gc, 239, 239, 239);
-    fill(gc, 0, 0, 320, 240);
-    color(gc, 24, 72, 128);
-    fill(gc, 0, 0, 320, 27);
-    color(gc, 255, 255, 255);
-    label(gc, 34, 6, "New capture - nCapture", draw);
-    color(gc, 0, 0, 0);
+    const UiTheme *theme = &ui_themes[0];
+    color(gc, (theme->bg >> 16) & 255, (theme->bg >> 8) & 255, theme->bg & 255);
+    fill(gc, 0, 0, UI_WIDTH, UI_HEIGHT);
+    font(gc, Bold12);
+    color(gc, (theme->fg >> 16) & 255, (theme->fg >> 8) & 255, theme->fg & 255);
+    label(gc, 8, 6, ui_text_for(capture->language,
+        "nCapture - Preview", "nCapture - 预览", "nCapture - Aperçu"), draw);
+    color(gc, (theme->muted >> 16) & 255, (theme->muted >> 8) & 255, theme->muted & 255);
     rect(gc, 59, 36, 201, 151);
-    rect(gc, 36, 194, 110, 25);
-    rect(gc, 160, 194, 124, 25);
-    rect(gc, 162, 196, 120, 21);
-    label(gc, 46, 199, "Close [Esc]", draw);
-    label(gc, 172, 199, "Save as [Enter]", draw);
-    label(gc, 33, 224, "Save again, or close for a new shot.", draw);
+    rect(gc, 36, 190, 110, 22);
+    color(gc, (theme->highlight_bg >> 16) & 255, (theme->highlight_bg >> 8) & 255, theme->highlight_bg & 255);
+    fill(gc, 160, 190, 124, 22);
+    font(gc, Regular10);
+    color(gc, (theme->fg >> 16) & 255, (theme->fg >> 8) & 255, theme->fg & 255);
+    label(gc, 46, 193, ui_text_for(capture->language,
+        "Close [Esc]", "关闭 [Esc]", "Fermer [Esc]"), draw);
+    color(gc, (theme->highlight_fg >> 16) & 255, (theme->highlight_fg >> 8) & 255, theme->highlight_fg & 255);
+    label(gc, 172, 193, ui_text_for(capture->language,
+        "Save [Enter]", "保存 [Enter]", "Sauver [Enter]"), draw);
+    font(gc, Regular9);
+    color(gc, (theme->muted >> 16) & 255, (theme->muted >> 8) & 255, theme->muted & 255);
+    label(gc, 8, UI_FOOTER_Y, ui_text_for(capture->language,
+        "Save again, or close for a new shot.",
+        "可重复保存；关闭后可重新截图。",
+        "Sauvez encore ou fermez pour recapturer."), draw);
     finish(gc);
     /* Use the SDK gui_gc_blit_to_screen buffer walk without changing OS VRAM. */
     void **surface = *(void ***)gc[9];
@@ -257,103 +277,185 @@ static int preview_frame(Capture *capture) {
 
 static const char *save_error(CaptureCode code) {
     switch (code) {
-        case CAPTURE_BAD_PATH: return "Invalid output path";
-        case CAPTURE_NO_NAMES: return "No free temporary filename";
-        case CAPTURE_OPEN_ERROR: return "Cannot create temporary file";
-        case CAPTURE_WRITE_ERROR: return "Write failed";
-        case CAPTURE_CLOSE_ERROR: return "Cannot finish file";
-        case CAPTURE_RENAME_ERROR: return "Cannot replace chosen file";
-        case CAPTURE_BACKUP_ERROR: return "Saved; old backup could not be removed";
-        case CAPTURE_DIALOG_ERROR: return "Native Save As unavailable on this OS";
-        default: return "Saved";
+        case CAPTURE_BAD_PATH: return ui_text(
+            "Invalid path", "路径无效", "Chemin invalide");
+        case CAPTURE_NO_NAMES: return ui_text(
+            "No free temporary name", "临时文件名已用尽", "Aucun nom temporaire libre");
+        case CAPTURE_OPEN_ERROR: return ui_text(
+            "Cannot open file", "无法打开文件", "Ouverture impossible");
+        case CAPTURE_WRITE_ERROR: return ui_text(
+            "Write failed", "写入失败", "Échec d'écriture");
+        case CAPTURE_CLOSE_ERROR: return ui_text(
+            "Cannot close file", "无法关闭文件", "Fermeture impossible");
+        case CAPTURE_RENAME_ERROR: return ui_text(
+            "Cannot replace file", "无法替换文件", "Remplacement impossible");
+        case CAPTURE_BACKUP_ERROR: return ui_text(
+            "Saved; cannot remove backup", "已保存；无法删除备份", "Sauvé ; suppression de sauvegarde impossible");
+        case CAPTURE_DIALOG_ERROR: return ui_text(
+            "Save As unavailable", "另存为不可用", "Enregistrer sous indisponible");
+        default: return ui_text("Saved", "已保存", "Sauvé");
     }
 }
 
 static void status(const Capture *capture, char *text, size_t size) {
-    char last[1800];
+    char last[2048];
     if (capture->no_display) {
-        snprintf(last, sizeof(last), "OS display is unavailable.");
+        snprintf(last, sizeof(last), "%s", ui_text(
+            "Display unavailable.", "屏幕不可用。", "Écran indisponible."));
     } else if (!capture->attempted) {
-        snprintf(last, sizeof(last), "No saves yet.");
+        snprintf(last, sizeof(last), "%s", ui_text(
+            "No saves yet.", "尚未保存。", "Aucune capture sauvée."));
     } else if (capture->result.code == CAPTURE_OK) {
-        snprintf(last, sizeof(last), "Saved: %s", capture->path);
+        snprintf(last, sizeof(last), ui_text(
+            "Saved: %s", "已保存：%s", "Sauvé : %s"), capture->path);
     } else {
-        snprintf(last, sizeof(last), "%s (error %d).\n%s%s%s%s%s",
+        snprintf(last, sizeof(last), ui_text(
+            "%s (error %d).\n%s%s%s%s%s", "%s（错误 %d）。\n%s%s%s%s%s",
+            "%s (erreur %d).\n%s%s%s%s%s"),
             save_error(capture->result.code),
             capture->result.error ? capture->result.error : capture->result.backup_error,
             capture->path,
-            capture->result.cleanup_error ? "\nTemporary file remains: " : "",
+            capture->result.cleanup_error ? ui_text(
+                "\nTemporary file: ", "\n残留临时文件：", "\nFichier temporaire : ") : "",
             capture->result.cleanup_error ? capture->temporary : "",
-            capture->result.backup_error ? "\nOld image retained in backup: " : "",
+            capture->result.backup_error ? ui_text(
+                "\nOld image backup: ", "\n原图备份：", "\nAncienne image : ") : "",
             capture->result.backup_error ? capture->backup : "");
     }
-    snprintf(text, size,
-        "%s - Ctrl+. opens a screenshot preview.\n"
-        "Enter: native Save As; Esc: close.\n"
-        "Remembered folder: %s\nName: %s\nSaved this boot: %u\n%s\n"
-        NKITS_VERSION " (" NKITS_COMMIT ") - " NKITS_STAGE,
-        capture->enabled ? "Enabled" : "Disabled", capture->folder,
-        capture->name, capture->saved, last);
+    snprintf(text, size, ui_text(
+        "Folder: %s\nName: %s\nSaved this boot: %u\n%s\n%s (%s)",
+        "文件夹：%s\n文件名：%s\n本次启动已保存：%u\n%s\n%s (%s)",
+        "Dossier : %s\nNom : %s\nSauvées ce démarrage : %u\n%s\n%s (%s)"),
+        capture->folder, capture->name, capture->saved, last, NKITS_VERSION, NKITS_COMMIT);
+}
+
+static bool output_input(const char *title, const char *prompt,
+                         const char *initial, char output[CAPTURE_DIALOG_MAX]) {
+    uint16_t heading[strlen(title) + 1], label[strlen(prompt) + 1];
+    uint16_t text[strlen(initial) + 1];
+    ascii2utf16(heading, title, sizeof(heading) / sizeof(*heading));
+    ascii2utf16(label, prompt, sizeof(label) / sizeof(*label));
+    ascii2utf16(text, initial, sizeof(text) / sizeof(*text));
+    String value = string_new(), message = string_new();
+    bool saved = false;
+    if (value && message) {
+        /* Request strings use UTF-16; the SDK's input helper uses single-byte text. */
+        string_set_utf16(value, (const char *)text);
+        string_set_utf16(message, (const char *)label);
+        String fields[] = {message, value};
+        if (_show_msgUserInput(0, fields, (const char *)heading, (const char *)label) &&
+            value->len > 0 && value->len < CAPTURE_DIALOG_MAX) {
+            char utf8[value->len * 3 + 1];
+            utf162ascii(utf8, (const uint16_t *)value->str, sizeof(utf8));
+            if (strlen(utf8) < CAPTURE_DIALOG_MAX) {
+                strcpy(output, utf8);
+                saved = true;
+            }
+        }
+    }
+    if (message) string_free(message);
+    if (value) string_free(value);
+    wait_no_key_pressed();
+    return saved;
 }
 
 static void output_settings(Capture *capture) {
-    int choice;
-    while ((choice = show_msgbox_3b("nCapture output",
-            "Defaults for native Save As. Folder must already exist.\n"
-            "Folder is relative to /documents (default /).\n"
-            "Keep .bmp in the name; OS files also receive .tns.",
-            "Folder", "Name", "Back")) == 1 || choice == 2) {
-        char *value = NULL;
-        char path[CAPTURE_PATH_MAX];
-        char *dest = choice == 1 ? capture->folder : capture->name;
-        if (show_msg_user_input("nCapture output", choice == 1 ?
-                "Folder below /documents:" : "Filename (including .bmp):", dest, &value) >= 0 && value) {
-            if (capture_dialog_path(choice == 1 ? value : capture->folder,
-                                    choice == 2 ? value : capture->name, path, sizeof(path)))
-                strcpy(dest, value);
-            else show_msgbox("nCapture", "Use a folder below /documents and a filename without path separators.");
-        }
-        free(value);
-    }
+    char folder[CAPTURE_DIALOG_MAX], name[CAPTURE_DIALOG_MAX];
+    char path[CAPTURE_PATH_MAX];
+    const char *title = ui_text("Output defaults", "默认输出", "Sortie par défaut");
+    if (!output_input(title, ui_text(
+            "Existing folder below /documents:", "/documents 下的已有文件夹：",
+            "Dossier existant sous /documents :"), capture->folder, folder))
+        return;
+    if (!output_input(title, ui_text(
+            "Filename (with .bmp):", "文件名（含 .bmp）：", "Nom du fichier (avec .bmp) :"),
+            capture->name, name))
+        return;
+    if (capture_dialog_path(folder, name, path, sizeof(path))) {
+        strcpy(capture->folder, folder);
+        strcpy(capture->name, name);
+    } else show_msgbox("nCapture", ui_text(
+        "Use a folder below /documents and a name without / or \\.",
+        "请使用 /documents 下的文件夹，文件名不能含 / 或 \\。",
+        "Dossier sous /documents ; nom sans / ni \\."));
 }
 
 int app_run(void) {
+    UiLanguage language = ui_language_init();
     bool fresh = false;
     const char *error = NULL;
     Capture *capture = resident_install(CAPTURE_ID, NKITS_BUILD_ID, &storage,
         sizeof(storage), capture_tick, capture_event, &fresh, &error);
     if (!capture) {
-        if (!nl_isstartup()) show_msgbox("nCapture", error ? error : "Install failed.");
+        if (!nl_isstartup()) show_msgbox("nCapture", error ? ui_error(error) :
+            ui_text("Install failed.", "安装失败。", "Échec d'installation."));
         return 1;
     }
+    capture->configuring = 1;
+    capture->language = language;
     frame_source = gui_gc_global_GC();
     if (fresh) {
-        capture->configuring = 1;
         capture->keypad_xor = hwtype() ? 0 : 0xffffu;
         strcpy(capture->folder, "/");
         strcpy(capture->name, "capture.bmp");
         capture->enabled = 1;
     }
     if (!nl_isstartup()) {
-        char text[2800];
-        int choice;
-        capture->configuring = 1;
-        if (fresh) show_msgbox("nCapture installed",
-            "Ctrl+. freezes the full OS screen and opens its preview.\n"
-            "Press Enter for native Save As, or Esc to close.\n"
-            "Default: /documents/capture.bmp.tns\n"
-            "Put ncapture.tns in /ndless/startup for silent startup installation.");
-        do {
-            status(capture, text, sizeof(text));
-            choice = show_msgbox_3b(fresh ? "nCapture" : "nCapture already installed", text,
-                capture->enabled ? "Disable" : "Enable", "Output", "Close");
-            if (choice == 1) {
-                if (!capture->enabled && !capture->frame_ready)
-                    capture->frame_ready = preview_frame(capture);
-                capture->enabled = capture->enabled ? 0 : capture->frame_ready;
+        UiCanvas canvas;
+        int selected = 0;
+        if (capture->frame_ready) capture->frame_ready = preview_frame(capture);
+        if (!ui_canvas_open(&canvas)) {
+            show_msgbox("nCapture", ui_text(
+                "Cannot open settings.", "无法打开设置。", "Réglages indisponibles."));
+        } else {
+            for (;;) {
+                const char *items[] = {
+                    capture->enabled ? ui_text(
+                        "Hotkey: on", "快捷键：开", "Raccourci : actif") : ui_text(
+                        "Hotkey: off", "快捷键：关", "Raccourci : inactif"),
+                    ui_text("Output defaults", "默认输出", "Sortie par défaut"),
+                    ui_text("Last save", "保存详情", "Dernière sauvegarde"),
+                    ui_text("About", "关于", "À propos"),
+                    ui_text("Back", "返回", "Retour")
+                };
+                selected = ui_menu(&canvas, "nCapture", items, 5, selected);
+                if (selected < 0 || selected == 4) break;
+                if (selected == 0) {
+                    char text[96];
+                    int enabled = capture->enabled;
+                    ndialog_t *dialog = ndlg_create(ui_text(
+                        "Hotkey settings", "快捷键设置", "Réglage du raccourci"));
+                    if (!dialog) {
+                        show_msgbox("nCapture", ui_text(
+                            "Cannot open settings.", "无法打开设置。", "Réglages indisponibles."));
+                        continue;
+                    }
+                    ndlg_add_checkbox(dialog, ui_text(
+                        "Enable Ctrl+.", "启用 Ctrl+.", "Activer Ctrl+."), &enabled);
+                    ndlg_add_label(dialog, ui_text(
+                        "Enter: Save As. Esc: close preview.",
+                        "Enter：另存为。Esc：关闭预览。",
+                        "Enter : sauver. Esc : fermer l'aperçu."));
+                    snprintf(text, sizeof(text), ui_text(
+                        "Saved this boot: %u", "本次启动已保存：%u", "Sauvées ce démarrage : %u"),
+                        capture->saved);
+                    ndlg_add_label(dialog, text);
+                    if (ui_show(dialog)) {
+                        if (enabled && !capture->frame_ready)
+                            capture->frame_ready = preview_frame(capture);
+                        capture->enabled = enabled ? capture->frame_ready : 0;
+                    }
+                } else if (selected == 1) output_settings(capture);
+                else if (selected == 2) {
+                    char text[3200];
+                    status(capture, text, sizeof(text));
+                    show_msgbox("nCapture", text);
+                } else if (selected == 3)
+                    ui_about("nCapture", "Copyright (c) 2013 Levak", "LGPL-2.0-or-later");
             }
-            if (choice == 2) output_settings(capture);
-        } while (choice == 1 || choice == 2);
+            ui_canvas_close(&canvas);
+        }
+        refresh_osscr();
         capture->hotkey.held = 0;
     }
     capture->configuring = 0;

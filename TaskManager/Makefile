@@ -11,11 +11,11 @@ HOST_CC ?= cc
 
 TARGET := taskmanager
 SOURCES := src/main.c src/tasks.c src/native.c src/ui.c
-OBJECTS := $(addprefix build/,$(SOURCES:.c=.o))
+OBJECTS := $(addprefix build/,$(SOURCES:.c=.o)) build/common/ui.o build/common/draw.o
 CPPFLAGS := -DNKITS_VERSION='"$(VERSION)"' -DNKITS_COMMIT='"$(COMMIT)"' \
 	-DNKITS_STAGE='"$(STAGE)"'
 CFLAGS := -std=gnu99 -Wall -Wextra -marm -ffunction-sections -fdata-sections -Isrc -I..
-LDFLAGS := -Wl,--gc-sections -lnspireio
+LDFLAGS := -Wl,--gc-sections
 ZEHNFLAGS := --name "TaskManager" --240x320-support true --uses-lcd-blit true
 
 ifeq ($(DEBUG),TRUE)
@@ -30,6 +30,10 @@ all: $(TARGET).tns
 build/src/ui.o: ../version.h FORCE
 
 build/src/%.o: src/%.c
+	mkdir -p $(dir $@)
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+
+build/common/%.o: ../common/%.c
 	mkdir -p $(dir $@)
 	$(GCC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 

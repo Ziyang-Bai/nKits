@@ -19,7 +19,8 @@ endif
 SOURCES := src/main.c src/app.c src/clock.c src/ui.c src/power.c \
 	tools/diagnose.c tools/diagnose_calls.c
 OBJECTS := $(addprefix $(BUILD)/,$(SOURCES:.c=.o)) $(BUILD)/common/resident.o \
-	$(BUILD)/common/resident_gate.o $(BUILD)/common/explorer.o $(BUILD)/common/explorer_gate.o
+	$(BUILD)/common/resident_gate.o $(BUILD)/common/explorer.o $(BUILD)/common/explorer_gate.o \
+	$(BUILD)/common/ui.o $(BUILD)/common/draw.o
 CPPFLAGS := -DNCLOCK_DIAGNOSTIC -DNKITS_VERSION='"$(VERSION)"' \
 	-DNKITS_COMMIT='"$(COMMIT)"' -DNKITS_STAGE='"$(STAGE)"'
 ifeq ($(MARKER_CACHE),FALSE)
@@ -44,7 +45,8 @@ $(BUILD)/resident_build.h: ../../common/build_id.py FORCE
 		--flags '$(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(ZEHNFLAGS)' \
 		Makefile ../Makefile $(wildcard ../src/*.c ../src/*.h) diagnose.c diagnose_calls.c \
 		../../common/resident.c ../../common/resident.h ../../common/resident_gate.S \
-		../../common/explorer.c ../../common/explorer.h ../../common/explorer_gate.S ../../version.h
+		../../common/explorer.c ../../common/explorer.h ../../common/explorer_gate.S \
+		../../common/ui.c ../../common/ui.h ../../common/draw.c ../../common/draw.h ../../version.h
 
 $(BUILD)/%.o: ../%.c $(BUILD)/resident_build.h
 	mkdir -p $(dir $@)

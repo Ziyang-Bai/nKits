@@ -1,0 +1,6 @@
+*.o
+*.d
+*.elf
+*.tns
+*.zehn
+.build/

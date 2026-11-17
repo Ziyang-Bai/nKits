@@ -123,6 +123,8 @@ void editor_init(Editor *editor, TextBuffer *buffer) {
     editor->top_offset = 0;
     editor->left_column = 0;
     editor->preferred_column = 0;
+    editor->visible_rows = NEDIT_VISIBLE_ROWS;
+    editor->visible_columns = NEDIT_VISIBLE_COLUMNS;
 }
 
 void editor_ensure_visible(Editor *editor) {
@@ -135,7 +137,7 @@ void editor_ensure_visible(Editor *editor) {
     if (current_start < editor->top_offset) {
         editor->top_offset = current_start;
     } else {
-        for (row = 0; row < NEDIT_VISIBLE_ROWS; ++row) {
+        for (row = 0; row < editor->visible_rows; ++row) {
             if (visible_start == current_start) {
                 visible = true;
                 break;
@@ -145,7 +147,7 @@ void editor_ensure_visible(Editor *editor) {
         }
         if (!visible) {
             editor->top_offset = current_start;
-            for (row = 1; row < NEDIT_VISIBLE_ROWS; ++row) {
+            for (row = 1; row < editor->visible_rows; ++row) {
                 size_t previous = editor_previous_line(editor, editor->top_offset);
                 if (previous == editor->top_offset) break;
                 editor->top_offset = previous;
@@ -154,8 +156,8 @@ void editor_ensure_visible(Editor *editor) {
     }
     if (column < editor->left_column) {
         editor->left_column = column;
-    } else if (column >= editor->left_column + NEDIT_VISIBLE_COLUMNS) {
-        editor->left_column = column - NEDIT_VISIBLE_COLUMNS + 1;
+    } else if (column >= editor->left_column + editor->visible_columns) {
+        editor->left_column = column - editor->visible_columns + 1;
     }
 }
 
@@ -184,7 +186,7 @@ bool editor_move(Editor *editor, EditorMove move) {
     unsigned index;
 
     if (move == EDIT_MOVE_PAGE_UP || move == EDIT_MOVE_PAGE_DOWN) {
-        count = NEDIT_VISIBLE_ROWS;
+        count = editor->visible_rows;
     }
     switch (move) {
         case EDIT_MOVE_LEFT:

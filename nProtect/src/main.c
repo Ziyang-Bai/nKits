@@ -2,9 +2,9 @@
 #include "resident.h"
 #include "resident_build.h"
 #include "version.h"
+#include "ui.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -62,11 +62,15 @@ static bool save_config(const Protect *protect) {
 
 static bool authorize(const Protect *protect) {
     if (!protect->enabled) return true;
-    unsigned choice = show_msgbox_2b(title,
-        "Keep your secret key combination held while selecting Unlock. Esc cancels.", "Unlock", "Cancel");
+    unsigned choice = show_msgbox_2b(title, ui_text(
+        "Hold your secret keys and choose Unlock.",
+        "按住秘密组合键，选择“解锁”。",
+        "Maintenez les touches secrètes et choisissez Déverrouiller."),
+        ui_text("Unlock", "解锁", "Déverrouiller"), ui_text("Cancel", "取消", "Annuler"));
     bool ok = choice == 1 && held(&protect->combo);
     wait_no_key_pressed();
-    if (choice == 1 && !ok) show_msgbox(title, "Secret combination not held. Settings unchanged.");
+    if (choice == 1 && !ok) show_msgbox(title, ui_text(
+        "Keys not held. No changes.", "未按住组合键，设置不变。", "Touches non maintenues. Aucun changement."));
     return ok;
 }
 
@@ -75,40 +79,114 @@ static void publish(App *app, const Protect *next) {
     unsigned mask = resident_lock();
     app->protect = *next;
     resident_unlock(mask);
-    if (!saved) show_msgbox(title,
-        "Settings active for this session, but nprotect.cfg could not be saved. Next boot may use the default '=' key.");
+    if (!saved) show_msgbox(title, ui_text(
+        "Active this session only: cannot save nprotect.cfg. Next boot may use '='.",
+        "无法保存 nprotect.cfg，仅本次生效；下次开机可能使用“=”。",
+        "Actif pour cette session : nprotect.cfg non enregistré. Au redémarrage, '=' peut être utilisé."));
 }
 
 static void configure(App *app) {
-    char *text = NULL;
     Protect next = app->protect;
-    if (show_msg_user_input(title,
-        "1-4 held keys, joined by +. Example: CTRL+SHIFT+A. '=' is the default. Enter/esc/home/arrows are not secret keys.",
-        "", &text) < 0) { free(text); return; }
-    if (!text || !protect_parse(&next.combo, text)) {
-        free(text);
-        show_msgbox(title, "Invalid combination. Use distinct keys: =, CTRL, SHIFT, A-Z, 0-9, PLUS, MINUS, MULTIPLY, DIVIDE, LP, RP, PERIOD, SPACE, VAR, TRIG, PI, EXP, SQU, EE, CAT, FRAC, NEGATIVE, DEL, TAB.");
+    int enabled = next.enabled;
+    char text[PROTECT_CONFIG_SIZE], combo[PROTECT_CONFIG_SIZE];
+    protect_format(&next.combo, combo);
+    strcpy(text, combo);
+    ndialog_t *dialog = ndlg_create("nProtect " NKITS_VERSION);
+    if (!dialog) return;
+    ndlg_set_padding(dialog, 1, 2);
+    if (ndlg_add_checkbox(dialog, ui_text("Protection", "保护", "Protection"), &enabled) < 0 ||
+        ndlg_add_text_entry(dialog, ui_text("Keys (1-4, +)", "密钥（1-4，+）", "Touches (1-4, +)"), text, sizeof(text)) < 0 ||
+        ndlg_add_label(dialog, ui_text(
+            "Hold keys to open My Documents.", "按住密钥打开“我的文档”。",
+            "Maintenir les touches pour ouvrir.")) < 0 ||
+        ndlg_add_label(dialog, ui_text(
+            "Browser only; recent files stay visible.", "仅保护入口，最近文档仍可访问。",
+            "Récents accessibles ; accès au navigateur.")) < 0 ||
+        ndlg_add_label(dialog, "nKits / GPL-3.0+") < 0) {
+        ndlg_destroy(dialog);
+        show_msgbox(title, ui_text("Cannot open settings.", "无法打开设置。", "Impossible d'ouvrir les réglages."));
         return;
     }
-    free(text);
-    char combo[PROTECT_CONFIG_SIZE];
-    protect_format(&next.combo, combo);
-    char message[240];
-    snprintf(message, sizeof(message), "Hold %s while choosing Confirm to check that the combination works on your keypad. Esc cancels.", combo);
-    if (show_msgbox_2b(title, message, "Confirm", "Cancel") != 1) return;
-    bool ok = held(&next.combo);
-    wait_no_key_pressed();
-    if (!ok) { show_msgbox(title, "Combination not held. Settings unchanged."); return; }
-    publish(app, &next);
+    if (!ui_show(dialog)) return;
+    next.enabled = enabled != 0;
+    if (!protect_parse(&next.combo, text)) {
+        char message[360];
+        snprintf(message, sizeof(message), "%s\n%s", ui_text(
+            "Use 1-4 distinct keys joined by +:",
+            "用 + 连接 1–4 个不同按键：",
+            "1–4 touches distinctes séparées par + :"),
+            "= CTRL SHIFT A-Z 0-9 PLUS MINUS MULTIPLY DIVIDE LP RP PERIOD SPACE "
+            "VAR TRIG PI EXP SQU EE CAT FRAC NEGATIVE DEL TAB");
+        show_msgbox(title, message);
+        return;
+    }
+    protect_format(&next.combo, text);
+    if (strcmp(text, combo)) {
+        char message[360];
+        snprintf(message, sizeof(message), ui_text(
+            "Hold %s and choose Confirm to test the keys.",
+            "按住 %s 并选择“确认”，验证组合键。",
+            "Maintenez %s et choisissez Confirmer pour tester."),
+            text);
+        if (show_msgbox_2b(title, message, ui_text("Confirm", "确认", "Confirmer"),
+            ui_text("Cancel", "取消", "Annuler")) != 1) return;
+        bool ok = held(&next.combo);
+        wait_no_key_pressed();
+        if (!ok) {
+            show_msgbox(title, ui_text("Keys not held. No changes.",
+                "未按住组合键，设置不变。", "Touches non maintenues. Aucun changement."));
+            return;
+        }
+    }
+    if (next.enabled && !app->protect.enabled &&
+        show_msgbox_2b(title, ui_text(
+            "Enable protection? Hold the secret keys whenever opening My Documents.",
+            "启用保护？每次打开“我的文档”都须按住秘密组合。",
+            "Activer la protection ? Maintenez les touches secrètes pour ouvrir Mes classeurs."),
+            ui_text("Enable", "启用", "Activer"), ui_text("Cancel", "取消", "Annuler")) != 1) return;
+    if (next.enabled != app->protect.enabled || strcmp(text, combo)) publish(app, &next);
+}
+
+static void menu(App *app, bool first_setup) {
+    UiCanvas canvas;
+    int selected = 0;
+    const char *items[] = {
+        ui_text("Protection settings", "保护设置", "Réglages de protection"),
+        ui_text("About", "关于", "À propos"),
+        ui_text("Back", "返回", "Retour")
+    };
+    if (!ui_canvas_open(&canvas)) {
+        show_msgbox(title, ui_text("Cannot open menu.", "无法打开菜单。", "Menu indisponible."));
+        return;
+    }
+    for (;;) {
+        selected = ui_menu(&canvas, title, items, 3, selected);
+        if (selected < 0 || selected == 2) break;
+        if (selected == 0) {
+            if (first_setup || authorize(&app->protect)) {
+                first_setup = false;
+                configure(app);
+            }
+        } else if (selected == 1) {
+            ui_about(title, ui_text(
+                "Behavior inspired by Excale's nProtect.",
+                "功能参考 Excale 的 nProtect。",
+                "Fonctions d'après nProtect d'Excale."),
+                "GPL-3.0-or-later");
+        }
+    }
+    ui_canvas_close(&canvas);
 }
 
 int main(void) {
     bool fresh, loaded = false;
     bool startup = nl_isstartup();
+    ui_language_init();
     const char *error = NULL;
     App *app = resident_install(PROTECT_ID, NKITS_BUILD_ID, &state, sizeof(state), NULL, NULL, &fresh, &error);
     if (!app) {
-        if (!startup) show_msgbox(title, error ? error : "Could not install nProtect.");
+        if (!startup) show_msgbox(title, error ? ui_error(error) :
+            ui_text("Cannot install nProtect.", "无法安装 nProtect。", "Impossible d'installer nProtect."));
         return 1;
     }
     if (fresh) {
@@ -117,32 +195,17 @@ int main(void) {
         app->policy = policy;
     }
     if (!resident_explorer(PROTECT_ID, app->policy, &error)) {
-        if (!startup) show_msgbox(title, error ? error : "Explorer hook unsupported. Protection was not enabled.");
+        if (!startup) show_msgbox(title, error ? ui_error(error) : ui_text(
+            "Explorer unsupported. Protection is off.", "不支持此文件浏览器，保护未启用。",
+            "Explorateur non pris en charge. Protection inactive."));
         if (fresh) _exit(1);
         return 1;
     }
-    if (!startup && ((fresh && !loaded) || authorize(&app->protect))) {
-        for (;;) {
-            char status[200];
-            snprintf(status, sizeof(status), "Explorer protection: %s\nSecret keys: %u\nRecent documents and titles are not protected.",
-                app->protect.enabled ? "ON" : "OFF", app->protect.combo.count);
-            unsigned choice = show_msgbox_3b(title, status, "Protection", "Settings", "Close");
-            if (choice == 1) {
-                Protect next = app->protect;
-                next.enabled = !next.enabled;
-                if (next.enabled && show_msgbox_2b(title,
-                    "Enable protection? Keep the configured combination held whenever opening Browse/My Documents.", "Enable", "Cancel") != 1) continue;
-                publish(app, &next);
-            } else if (choice == 2) {
-                unsigned option = show_msgbox_3b(title, "Settings", "Secret keys", "About", "Back");
-                if (option == 1) configure(app);
-                else if (option == 2) show_msgbox(title,
-                    "nProtect " NKITS_VERSION "\n" NKITS_STAGE "\nCommit " NKITS_COMMIT
-                    "\nnKits / Ndless\nExplorer access gate, not encryption.\nIndependent implementation of Excale's nProtect behavior.");
-            } else break;
-        }
+    if (!startup) {
+        menu(app, fresh && !loaded);
+        wait_no_key_pressed();
+        refresh_osscr();
     }
-    if (!startup) wait_no_key_pressed();
     if (fresh) _exit(0);
     return 0;
 }

@@ -12,13 +12,13 @@ HOST_CC ?= cc
 
 TARGET := nhex
 SOURCES := src/main.c src/app.c src/editor.c src/file_buffer.c src/input.c src/ui.c
-OBJECTS := $(SOURCES:.c=.o)
+OBJECTS := $(SOURCES:.c=.o) build/common_draw.o
 CPPFLAGS := -DNKITS_VERSION='"$(VERSION)"' -DNKITS_COMMIT='"$(COMMIT)"' \
 	-DNKITS_STAGE='"$(STAGE)"'
 
 CFLAGS := -std=gnu99 -Wall -Wextra -marm -ffunction-sections -fdata-sections -Isrc -I..
-LDFLAGS := -Wl,--gc-sections -lnspireio
-ZEHNFLAGS := --name "nHex"
+LDFLAGS := -Wl,--gc-sections
+ZEHNFLAGS := --name "nHex" --240x320-support true --uses-lcd-blit true
 
 ifeq ($(DEBUG),TRUE)
 CFLAGS += -O0 -g
@@ -29,10 +29,15 @@ endif
 .PHONY: all clean host-test FORCE
 
 all: $(TARGET).tns
-src/ui.o: ../version.h FORCE
+src/ui.o: ../version.h ../common/draw.h FORCE
+$(SOURCES:.c=.o): $(wildcard src/*.h)
 
 
 src/%.o: src/%.c
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+build/common_draw.o: ../common/draw.c ../common/draw.h
+	mkdir -p build
 	$(GCC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(TARGET).elf: $(OBJECTS)

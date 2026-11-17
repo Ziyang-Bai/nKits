@@ -25,6 +25,8 @@ jobs:
       - name: Set up Ndless
         id: ndless
         uses: Ziyang-Bai/setup-ndless@v1
+        with:
+          ndless-ref: e52415fb568e92cd36ed049067b3e9c2727b84af
       - name: Prepare build metadata
         shell: bash
         env:
@@ -40,6 +42,11 @@ jobs:
           echo "NKITS_COMMIT=${GITHUB_SHA::12}" >> "$GITHUB_ENV"
           echo "NKITS_STAGE=Alpha Testing" >> "$GITHUB_ENV"
 
+
+      - name: Package nSee notices
+        run: |
+          cd nSee
+          zip nsee-notices.zip LICENSE README.md third_party/libjpeg/README third_party/libpng/png.h
 
       - name: Build calculator packages
         run: make VERSION="$NKITS_VERSION" COMMIT="$NKITS_COMMIT" STAGE="$NKITS_STAGE"
@@ -60,7 +67,10 @@ jobs:
             nHide/nhide.tns
             ThemeEditor/themeeditor.tns
             TaskManager/taskmanager.tns
+            nTexts/nTexts.tns
+            nSee/nsee.tns
             LICENSE
+            nSee/nsee-notices.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -74,7 +84,7 @@ jobs:
           body: |
             Alpha Testing build of nKits from ${{ github.repository }}@${{ github.sha }}.
 
-            Download the individual .tns files below. Copyright and license notices are in the corresponding source files; LICENSE is attached.
+            Download the individual .tns files below. Source is available at the tagged revision. Copyright and license notices are in the corresponding source files; LICENSE and the nSee notices archive are attached.
           files: |
             nHex/nhex.tns
             nEdit/nedit.tns
@@ -87,7 +97,10 @@ jobs:
             nHide/nhide.tns
             ThemeEditor/themeeditor.tns
             TaskManager/taskmanager.tns
+            nTexts/nTexts.tns
             LICENSE
+            nSee/nsee.tns
+            nSee/nsee-notices.zip
           fail_on_unmatched_files: true
           generate_release_notes: true
 
@@ -129,7 +142,7 @@ jobs:
 
           shopt -s globstar nullglob
           files=(packages/**/*.tns)
-          gh release upload nightly "${files[@]}" packages/LICENSE --clobber
+          gh release upload nightly "${files[@]}" packages/LICENSE packages/nSee/nsee-notices.zip --clobber
 
           {
             echo "Unstable nKits tools built from $GH_REPO@$GITHUB_SHA."
@@ -141,6 +154,8 @@ jobs:
               printf -- '- [%s](https://github.com/%s/releases/download/nightly/%s)\n' \
                 "$name" "$GH_REPO" "$name"
             done
+            echo
+            echo "Source and build instructions: https://github.com/$GH_REPO/tree/$GITHUB_SHA"
           } > "$RUNNER_TEMP/nightly-notes.md"
 
           tag="$(gh api "repos/$GH_REPO/git/matching-refs/tags/nightly" \

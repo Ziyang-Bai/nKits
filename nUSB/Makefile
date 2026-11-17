@@ -17,7 +17,7 @@ C_SOURCES := src/main.c src/app.c src/browser.c src/input.c src/ui.c \
 	src/storage.c src/fileops.c src/name_editor.c src/text.c src/language.c \
 	third_party/fatfs/ff.c third_party/fatfs/ffunicode.c
 ASM_SOURCES := src/resident_gate.S
-OBJECTS := $(addprefix build/,$(C_SOURCES:.c=.o) $(ASM_SOURCES:.S=.o))
+OBJECTS := $(addprefix build/,$(C_SOURCES:.c=.o) $(ASM_SOURCES:.S=.o)) build/common/draw.o
 CPPFLAGS := -DNKITS_VERSION='"$(VERSION)"' -DNKITS_COMMIT='"$(COMMIT)"' \
 	-DNKITS_STAGE='"$(STAGE)"'
 CFLAGS := -std=gnu99 -Wall -Wextra -marm -ffunction-sections -fdata-sections \
@@ -54,6 +54,10 @@ build/resident_build.h: tests/build_id.py Makefile FORCE
 		--version '$(VERSION)' --commit '$(COMMIT)' --stage '$(STAGE)'
 
 $(OBJECTS): build/resident_build.h
+
+build/common/%.o: ../common/%.c
+	mkdir -p $(dir $@)
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 build/%.o: %.c
 	mkdir -p $(dir $@)

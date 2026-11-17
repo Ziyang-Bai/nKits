@@ -15,7 +15,7 @@ CORE := src/fs.c src/usb_msc.c src/bot.c src/resident.c src/resident_check.c \
 	src/input.c src/ui.c src/text.c \
 	third_party/fatfs/ff.c third_party/fatfs/ffunicode.c
 SOURCES := tools/diagnose_main.c tools/diagnose_run.c tools/diagnose_usb.c $(CORE)
-OBJECTS := $(addprefix $(BUILD)/,$(SOURCES:.c=.o)) $(BUILD)/src/resident_gate.o
+OBJECTS := $(addprefix $(BUILD)/,$(SOURCES:.c=.o)) $(BUILD)/src/resident_gate.o $(BUILD)/common/draw.o
 CPPFLAGS := -DNUSB_DIAGNOSTIC=1 -DNKITS_VERSION='"$(VERSION)"' \
 	-DNKITS_COMMIT='"$(COMMIT)"' -DNKITS_STAGE='"$(STAGE)"'
 CFLAGS := -std=gnu99 -Wall -Wextra -marm -Os -ffunction-sections -fdata-sections \
@@ -38,6 +38,10 @@ $(BUILD)/resident_build.h: ../tests/build_id.py Makefile FORCE
 		--extra-source tools/diagnose.h --extra-source tools/Makefile \
 		$(foreach source,$(filter tools/%,$(SOURCES)),--extra-source $(source)) \
 		--version '$(VERSION)' --commit '$(COMMIT)' --stage '$(STAGE)'
+
+$(BUILD)/common/%.o: ../../common/%.c $(BUILD)/resident_build.h
+	mkdir -p $(dir $@)
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/%.o: ../%.c $(BUILD)/resident_build.h
 	mkdir -p $(dir $@)

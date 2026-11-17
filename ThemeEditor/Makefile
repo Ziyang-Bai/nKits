@@ -13,7 +13,7 @@ PYTHON ?= python3
 TARGET := themeeditor
 SOURCES := src/main.c src/app.c src/theme.c src/platform.c src/ui.c
 OBJECTS := $(addprefix build/,$(SOURCES:.c=.o)) build/common/resident.o \
-	build/common/resident_gate.o build/common/explorer.o build/common/explorer_gate.o
+	build/common/resident_gate.o build/common/explorer.o build/common/explorer_gate.o build/common/draw.o
 CPPFLAGS := -DNKITS_VERSION='"$(VERSION)"' -DNKITS_COMMIT='"$(COMMIT)"' \
 	-DNKITS_STAGE='"$(STAGE)"'
 CFLAGS := -std=gnu99 -Wall -Wextra -marm -ffunction-sections -fdata-sections \
@@ -36,7 +36,7 @@ build/resident_build.h: ../common/build_id.py FORCE
 		--flags '$(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(ZEHNFLAGS)' \
 		Makefile $(wildcard src/*.c src/*.h) ../common/resident.c ../common/resident.h \
 		../common/resident_gate.S ../common/explorer.c ../common/explorer.h \
-		../common/explorer_gate.S ../version.h
+		../common/explorer_gate.S ../common/draw.c ../common/draw.h ../version.h
 
 $(OBJECTS): build/resident_build.h
 
