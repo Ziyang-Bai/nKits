@@ -44,7 +44,7 @@ make VERSION=dev COMMIT=local
 Copyright (c) 2026 Ziyang-Bai. [GNU GPL v3.0](LICENSE)。
 
 - **nClock**：Copyright (c) 2014 Levak. Contributions by Xavier Andreani (2016). GPL v3+。
-- **nSee**：Original mViewer_CX, Copyright (c) 2013-2019 Xavier Andréani, JayTe, Excale。移植版 GPL v3；图像库保留 libpng / IJG 许可证，详见 [nSee/README.md](nSee/README.md)。
+- **nSee**：Original mViewer_CX, Copyright (c) 2013-2019 Xavier Andréani, JayTe, Excale。
 - **nCapture**：Copyright (c) 2013 Levak. LGPL v2+。
 - **FatFs**：Copyright (c) 2025 ChaN. [BSD-style 1-clause](nUSB/third_party/fatfs/LICENSE.txt)。
 - **NspireIO**：Julian Mackeben / compu、Manfred Becker、totorigolo。[LGPL v2.1+](https://github.com/Vogtinator/nspire-io)。
